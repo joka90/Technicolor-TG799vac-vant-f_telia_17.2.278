@@ -1,0 +1,4 @@
+config VDNTO_BUTTON
+	tristate "VDNT-O Button Support"
+	help
+        Enable driver for VDNT-O Buttons

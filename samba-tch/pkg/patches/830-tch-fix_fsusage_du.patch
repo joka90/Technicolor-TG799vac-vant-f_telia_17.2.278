@@ -1,0 +1,48 @@
+diff -ru a/source/lib/fsusage.c b/source/lib/fsusage.c
+--- a/source/lib/fsusage.c	2016-09-08 08:55:30.847783509 +0800
++++ b/source/lib/fsusage.c	2016-09-08 09:25:36.939759312 +0800
+@@ -107,6 +107,7 @@
+ 		DIR *dir;
+ 		struct dirent *entry;
+ 		char *newfile;
++		struct stat filestat;
+ 
+ 		dir = opendir(filename);
+ 		if (!dir) {
+@@ -117,9 +118,11 @@
+ 			newfile = concat_subpath_file(filename, entry->d_name);
+ 			if (newfile == NULL)
+ 				continue;
+-			++G.du_depth;
+-			sum += du(newfile);
+-			--G.du_depth;
++			if (lstat(newfile, &filestat) == 0 && filestat.st_dev == statbuf.st_dev){
++				++G.du_depth;
++				sum += du(newfile);
++				--G.du_depth;
++			}
+ 			free(newfile);
+ 		}
+ 		closedir(dir);
+diff -ru a/source/printing/printing.c b/source/printing/printing.c
+--- a/source/printing/printing.c	2016-09-08 08:58:22.475781210 +0800
++++ b/source/printing/printing.c	2016-09-09 08:35:25.448789297 +0800
+@@ -2350,6 +2350,7 @@
+ 		if (sys_fsusage(path, &dspace, &dsize) == 0 &&
+ 		    dspace < 2*(SMB_BIG_UINT)lp_minprintspace(snum)) {
+ 			DEBUG(3, ("print_job_start: disk space check failed.\n"));
++			syslog(LOG_CRIT, "[samba] print_job_start: disk space check failed.\n");
+ 			release_print_db(pdb);
+ 			errno = ENOSPC;
+ 			return (uint32)-1;
+diff -ru a/source/smbd/fileio.c b/source/smbd/fileio.c
+--- a/source/smbd/fileio.c	2016-09-08 08:59:22.419780407 +0800
++++ b/source/smbd/fileio.c	2016-09-09 08:36:09.160788712 +0800
+@@ -227,6 +227,7 @@
+ 				SMB_BIG_UINT dspace, dsize;
+ 				if (sys_fsusage(path, &dspace, &dsize) == 0 &&
+ 					dspace < 2*(SMB_BIG_UINT)lp_minprintspace(snum)) {
++					syslog(LOG_CRIT, "[samba] No free space, the file to be print is too big!");
+ 					errno = ENOSPC;
+ 					fsp->fh->private_options |= FILE_DELETE_ON_CLOSE;
+ 					sys_ftruncate(fsp->fh->fd, 0);

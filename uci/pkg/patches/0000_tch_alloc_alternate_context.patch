@@ -1,0 +1,76 @@
+diff --git a/libuci.c b/libuci.c
+index a9e70e8..54761b9 100644
+--- a/libuci.c
++++ b/libuci.c
+@@ -43,11 +43,14 @@ static const char *uci_errstr[] = {
+ __private const char *uci_confdir = UCI_CONFDIR;
+ __private const char *uci_savedir = UCI_SAVEDIR;
+ 
+-/* exported functions */
+-struct uci_context *uci_alloc_context(void)
++static struct uci_context *alloc_context(const char *confdir, const char *savedir)
+ {
+ 	struct uci_context *ctx;
+ 
++	if( !confdir || !savedir ) {
++		return NULL;
++	}
++
+ 	ctx = (struct uci_context *) malloc(sizeof(struct uci_context));
+ 	if (!ctx)
+ 		return NULL;
+@@ -58,9 +61,9 @@ struct uci_context *uci_alloc_context(void)
+ 	uci_list_init(&ctx->backends);
+ 	ctx->flags = UCI_FLAG_STRICT | UCI_FLAG_SAVED_DELTA;
+ 
+-	ctx->confdir = (char *) uci_confdir;
+-	ctx->savedir = (char *) uci_savedir;
+-	uci_add_delta_path(ctx, uci_savedir);
++	ctx->confdir = (char *) confdir;
++	ctx->savedir = (char *) savedir;
++	uci_add_delta_path(ctx, savedir);
+ 
+ 	uci_list_add(&ctx->backends, &uci_file_backend.e.list);
+ 	ctx->backend = &uci_file_backend;
+@@ -68,6 +71,25 @@ struct uci_context *uci_alloc_context(void)
+ 	return ctx;
+ }
+ 
++/* exported functions */
++struct uci_context *uci_alloc_alternate_context(const char *confdir, const char *savedir)
++{
++	confdir = confdir ? strdup(confdir) : uci_confdir;
++	savedir = savedir ? strdup(savedir) : uci_savedir;
++
++	struct uci_context *context = alloc_context(confdir, savedir);
++	if( ! context ) {
++		if( confdir != uci_confdir ) free((char*)confdir);
++		if( savedir != uci_savedir ) free((char*)savedir);
++	}
++	return context;
++}
++
++struct uci_context *uci_alloc_context(void)
++{
++	return alloc_context(uci_confdir, uci_savedir);
++}
++
+ void uci_free_context(struct uci_context *ctx)
+ {
+ 	struct uci_element *e, *tmp;
+diff --git a/uci.h b/uci.h
+index c5583ed..dbb346c 100644
+--- a/uci.h
++++ b/uci.h
+@@ -78,6 +78,11 @@ struct uci_parse_context;
+ extern struct uci_context *uci_alloc_context(void);
+ 
+ /**
++ * uci_alloc_alternate_context: Allocate new uci context with specific default
++ */
++extern struct uci_context *uci_alloc_alternate_context(const char *confdir, const char *savedir);
++
++/**
+  * uci_free_context: Free the uci context including all of its data
+  */
+ extern void uci_free_context(struct uci_context *ctx);

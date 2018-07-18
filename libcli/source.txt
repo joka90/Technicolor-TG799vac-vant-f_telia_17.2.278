@@ -1,0 +1,4 @@
+Source: libcli-1.9.4.tar.gz
+Source-Url: http://libcli.googlecode.com/files
+Source-Version: 
+Source-Proto: 

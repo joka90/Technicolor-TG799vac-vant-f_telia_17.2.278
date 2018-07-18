@@ -1,0 +1,225 @@
+
+
+BUILD_DIR=$(CURDIR)/../..
+export BUILD_DIR
+
+PHONY := _all
+_all:
+
+LINUX_DIR = $(BUILD_DIR)/linux
+
+KERNEL_DIR := $(BUILD_DIR)/kernel/linux-3.4rt
+
+export BRCM_APP_CFLAGS :=  $(BRCM_COMMON_CFLAGS) -mno-shared
+export BRCM_SO_CFLAGS :=   $(BRCM_COMMON_CFLAGS)
+
+export LINUX_DIR
+
+export NO_WERRS=1
+
+BCM_KF:=y
+
+include $(BUILD_DIR)/make.common
+
+export KERNEL_DEBUG
+
+ifneq ($(OPENWRT_BUILD_VOICE),)
+include $(BUILD_DIR)/make.voice
+endif
+
+include $(CURDIR)/Makefile
+
+
+###########################################
+#
+# System-wide exported variables
+# (in alphabetical order)
+#
+###########################################
+
+
+export \
+ACTUAL_MAX_JOBS            \
+BRCMAPPS                   \
+BRCM_BOARD                 \
+BRCM_DRIVER_PCI            \
+BRCM_EXTRAVERSION          \
+BRCM_KERNEL_NETQOS         \
+BRCM_KERNEL_ROOTFS         \
+BRCM_KERNEL_AUXFS_JFFS2    \
+BRCM_LDX_APP               \
+BRCM_MIPS_ONLY_BUILD       \
+BRCM_CPU_FREQ_PWRSAVE      \
+BRCM_PSI_VERSION           \
+BRCM_PTHREADS              \
+BRCM_RAMDISK_BOOT_EN       \
+BRCM_RAMDISK_SIZE          \
+BRCM_NFS_MOUNT_EN          \
+BRCM_RELEASE               \
+BRCM_RELEASETAG            \
+BRCM_SNMP                  \
+BRCM_VERSION               \
+BUILD_CMFCTL               \
+BUILD_CMFVIZ               \
+BUILD_CMFD                 \
+BUILD_XDSLCTL              \
+BUILD_XTMCTL               \
+BUILD_VLANCTL              \
+BUILD_BRCM_VLAN            \
+BUILD_BRCTL                \
+BUILD_BUSYBOX              \
+BUILD_BUSYBOX_BRCM_LITE    \
+BUILD_BUSYBOX_BRCM_FULL    \
+BUILD_CERT                 \
+BUILD_DDNSD                \
+BUILD_DEBUG_TOOLS          \
+BUILD_DIAGAPP              \
+BUILD_DIR                  \
+BUILD_DNSPROBE             \
+BUILD_DPROXY               \
+BUILD_DPROXYWITHPROBE      \
+BUILD_DYNAHELPER           \
+BUILD_DNSSPOOF             \
+BUILD_EBTABLES             \
+BUILD_EPITTCP              \
+BUILD_ETHWAN               \
+BUILD_FTPD                 \
+BUILD_FTPD_STORAGE         \
+BUILD_MCAST_PROXY          \
+MCPD_NOPROXY               \
+BUILD_WLHSPOT              \
+BUILD_IPPD                 \
+BUILD_IPROUTE2             \
+BUILD_IPSEC_TOOLS          \
+BUILD_L2TPAC               \
+BUILD_IPTABLES             \
+BUILD_WPS_BTN              \
+BUILD_LLTD                 \
+BUILD_WSC                  \
+BUILD_BCMCRYPTO \
+BUILD_BCMSHARED \
+BUILD_MKSQUASHFS           \
+BUILD_NAS                  \
+BUILD_NVRAM                \
+BUILD_PORT_MIRRORING			 \
+BUILD_PPPD                 \
+PPP_AUTODISCONN			   \
+BUILD_SES                  \
+BUILD_SIPROXD              \
+BUILD_SLACTEST             \
+BUILD_SNMP                 \
+BUILD_SNTP                 \
+BUILD_SOAP                 \
+BUILD_SOAP_VER             \
+BUILD_SSHD                 \
+BUILD_SSHD_MIPS_GENKEY     \
+BUILD_TOD                  \
+BUILD_TR64                 \
+BUILD_TR64_DEVICECONFIG    \
+BUILD_TR64_DEVICEINFO      \
+BUILD_TR64_LANCONFIGSECURITY \
+BUILD_TR64_LANETHINTERFACECONFIG \
+BUILD_TR64_LANHOSTS        \
+BUILD_TR64_LANHOSTCONFIGMGMT \
+BUILD_TR64_LANUSBINTERFACECONFIG \
+BUILD_TR64_LAYER3          \
+BUILD_TR64_MANAGEMENTSERVER  \
+BUILD_TR64_TIME            \
+BUILD_TR64_USERINTERFACE   \
+BUILD_TR64_QUEUEMANAGEMENT \
+BUILD_TR64_LAYER2BRIDGE   \
+BUILD_TR64_WANCABLELINKCONFIG \
+BUILD_TR64_WANCOMMONINTERFACE \
+BUILD_TR64_WANDSLINTERFACE \
+BUILD_TR64_WANDSLLINKCONFIG \
+BUILD_TR64_WANDSLCONNECTIONMGMT \
+BUILD_TR64_WANDSLDIAGNOSTICS \
+BUILD_TR64_WANETHERNETCONFIG \
+BUILD_TR64_WANETHERNETLINKCONFIG \
+BUILD_TR64_WANIPCONNECTION \
+BUILD_TR64_WANPOTSLINKCONFIG \
+BUILD_TR64_WANPPPCONNECTION \
+BUILD_TR64_WLANCONFIG      \
+BUILD_TR69C                \
+BUILD_TR69_QUEUED_TRANSFERS \
+BUILD_TR69C_SSL            \
+BUILD_TR69_XBRCM           \
+BUILD_TR69_UPLOAD          \
+BUILD_TR69C_VENDOR_RPC     \
+BUILD_OMCI                 \
+BUILD_UDHCP                \
+BUILD_UDHCP_RELAY          \
+BUILD_UPNP                 \
+BUILD_VCONFIG              \
+BUILD_SUPERDMZ             \
+BUILD_WLCTL                \
+BUILD_DHDCTL               \
+BUILD_ZEBRA                \
+BUILD_LIBUSB               \
+BUILD_WANVLANMUX           \
+HOSTTOOLS_DIR              \
+INC_KERNEL_BASE            \
+INSTALL_DIR                \
+PROFILE_DIR                \
+WEB_POPUP                  \
+BUILD_VIRT_SRVR            \
+BUILD_PORT_TRIG            \
+BUILD_TR69C_BCM_SSL        \
+BUILD_IPV6                 \
+BUILD_BOARD_LOG_SECTION    \
+BRCM_LOG_SECTION_SIZE      \
+BRCM_FLASHBLK_SIZE         \
+BRCM_AUXFS_PERCENT         \
+BRCM_BACKUP_PSI            \
+LINUX_KERNEL_USBMASS       \
+BUILD_IPSEC                \
+BUILD_MoCACTL              \
+BUILD_MoCACTL2             \
+BUILD_6802_MOCA            \
+BUILD_GPON                 \
+BUILD_GPONCTL              \
+BUILD_PMON                 \
+BUILD_BUZZZ                \
+BUILD_BOUNCE               \
+BUILD_HELLO                \
+BUILD_SPUCTL               \
+BUILD_PWRCTL               \
+BUILD_RNGD                 \
+RELEASE_BUILD              \
+NO_PRINTK_AND_BUG          \
+FLASH_NAND_BLOCK_16KB      \
+FLASH_NAND_BLOCK_128KB     \
+FLASH_NAND_BLOCK_256KB     \
+FLASH_NAND_BLOCK_512KB     \
+FLASH_NAND_BLOCK_1024KB     \
+FLASH_NAND_BLOCK_2056KB     \
+BRCM_SCHED_RT_RUNTIME       \
+BRCM_CONFIG_HIGH_RES_TIMERS \
+BRCM_SWITCH_SCHED_SP        \
+BRCM_SWITCH_SCHED_WRR       \
+BUILD_SWMDK                 \
+BUILD_IQCTL                 \
+BUILD_BPMCTL                \
+BUILD_EPONCTL               \
+BUILD_ETHTOOL               \
+BUILD_TMS                   \
+IMAGE_VERSION               \
+TOOLCHAIN_VER               \
+TOOLCHAIN_PREFIX            \
+PROFILE_KERNEL_VER          \
+KERNEL_LINKS_DIR            \
+LINUX_VER_STR               \
+KERNEL_DIR                  \
+FORCE                       \
+BUILD_VLAN_AGGR             \
+BUILD_DPI                   \
+BRCM_KERNEL_DEBUG           \
+BUILD_BRCM_FTTDP            \
+BUILD_BRCM_XDSL_DISTPOINT   \
+BRCM_1905_FM                \
+BUILD_BRCM_CMS              \
+BUILD_WEB_SOCKETS           \
+BUILD_WEB_SOCKETS_TEST      \
+BRCM_1905_TOPOLOGY_WEB_PAGE
+
+

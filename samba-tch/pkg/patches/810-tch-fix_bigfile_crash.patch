@@ -1,0 +1,142 @@
+--- a/source/lib/fsusage.c
++++ b/source/lib/fsusage.c
+@@ -21,6 +21,32 @@
+ #include "includes.h"
+ 
+ 
++/* Return the result of executed command,
++ * here the result is a number.
++ */
++static SMB_BIG_UINT cal_size(char *cmd)
++{
++	FILE *fstream = NULL;
++	char buf[32];
++	SMB_BIG_UINT size = 0;
++
++	memset(buf, 0, sizeof(buf));
++	if((fstream = popen(cmd, "r")) == NULL)
++		return 0;
++
++	if(NULL != fgets(buf, sizeof(buf), fstream))
++	{
++		size = atoi(buf);
++	}
++	else
++	{
++		pclose(fstream);
++		return 0;
++	}
++	pclose(fstream);
++	return size;
++}
++
+ /* Return the number of TOSIZE-byte blocks used by
+    BLOCKS FROMSIZE-byte blocks, rounding away from zero.
+ */
+@@ -144,6 +170,14 @@
+ #else
+ #if !defined(STAT_STATFS2_FS_DATA)
+ 	/* !Ultrix */
++	if (fsd.f_blocks == 0)
++	{
++		memset(&fsd, 0, sizeof(fsd));
++		fsd.f_bsize = 1024;
++		fsd.f_blocks = cal_size("total=`/bin/mount | grep 'tmpfs on /tmp' | cut -d '=' -f 2 | cut -d ',' -f 1`; let total=$total/1024; echo $total");
++		fsd.f_bavail = cal_size("/usr/bin/du -shk /tmp/ | cut -d$'\t' -f 1");
++		fsd.f_bavail = fsd.f_blocks - fsd.f_bavail;
++	}
+ 	(*dsize) = CONVERT_BLOCKS (fsd.f_blocks);
+ 	(*dfree) = CONVERT_BLOCKS (fsd.f_bavail);
+ #endif /* not STAT_STATFS2_FS_DATA */
+--- a/source/printing/printing.c
++++ b/source/printing/printing.c
+@@ -2482,6 +2482,8 @@
+ 	int ret;
+ 	SMB_STRUCT_STAT sbuf;
+ 	struct printif *current_printif = get_printer_fns( snum );
++	extern struct current_user current_user;
++	WERROR werr = WERR_OK;
+ 
+ 	pjob = print_job_find(sharename, jobid);
+ 
+@@ -2491,6 +2493,12 @@
+ 	if (pjob->spooled || pjob->pid != sys_getpid())
+ 		return False;
+ 
++	/* Encounter LPQ_ERROR, cleanup; It is caused by no space to save file */
++	if (pjob->status == LPQ_ERROR) {
++		print_job_delete(&current_user, snum, jobid, &werr);
++		return False;
++	}
++
+ 	if ((close_type == NORMAL_CLOSE || close_type == SHUTDOWN_CLOSE) &&
+ 				(sys_fstat(pjob->fd, &sbuf) == 0)) {
+ 		pjob->size = sbuf.st_size;
+@@ -2549,6 +2557,28 @@
+ }
+ 
+ /****************************************************************************
++ Store LPQ_ERROR for job due to no free space to save print file.
++****************************************************************************/
++
++void print_job_error(int snum, int jobid)
++{
++	const char *sharename = lp_servicename(snum);
++	struct printjob *pjob = print_job_find(sharename, jobid);
++
++	if (!pjob)
++		return;
++
++	/* don't allow another process to get this info - it is meaningless */
++	if (pjob->pid != sys_getpid())
++		return;
++
++	/* Set the tdb entry to be deleting. */
++	pjob->status = LPQ_ERROR;
++	pjob_store(sharename, jobid, pjob);
++	unlink(pjob->filename);
++}
++
++/****************************************************************************
+  Get a snapshot of jobs in the system without traversing.
+ ****************************************************************************/
+ 
+--- a/source/smbd/fileio.c
++++ b/source/smbd/fileio.c
+@@ -207,6 +207,9 @@
+ #else
+ 		fstring sharename;
+ 		uint32 jobid;
++		char *path;
++		int snum = SNUM(fsp->conn);
++		path = lp_pathname(snum);
+ 
+ 		if (!rap_to_pjobid(fsp->rap_print_jobid, sharename, &jobid)) {
+ 			DEBUG(3,("write_file: Unable to map RAP jobid %u to jobid.\n",
+@@ -215,6 +218,26 @@
+ 			return -1;
+ 		}
+ 
++		/* see if we have sufficient disk space */
++		if (lp_minprintspace(snum)) {
++			if(fsp->fh->private_options & FILE_DELETE_ON_CLOSE) {
++				errno = ENOSPC;
++				return(n);
++			} else {
++				SMB_BIG_UINT dspace, dsize;
++				if (sys_fsusage(path, &dspace, &dsize) == 0 &&
++					dspace < 2*(SMB_BIG_UINT)lp_minprintspace(snum)) {
++					errno = ENOSPC;
++					fsp->fh->private_options |= FILE_DELETE_ON_CLOSE;
++					sys_ftruncate(fsp->fh->fd, 0);
++					print_job_error(snum, jobid);
++					return(n);
++				} else {
++					errno = 0;
++				}
++			}
++		}
++
+ 		return print_job_write(SNUM(fsp->conn), jobid, data, pos, n);
+ #endif /* AVM_NO_PRINTING */
+ 	}

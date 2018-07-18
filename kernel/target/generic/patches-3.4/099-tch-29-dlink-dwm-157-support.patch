@@ -1,0 +1,48 @@
+--- a/include/linux/usb.h
++++ b/include/linux/usb.h
+@@ -715,6 +715,22 @@ static inline int usb_make_path(struct u
+ 	.bcdDevice_hi = (hi)
+ 
+ /**
++ * USB_DEVICE_INTERFACE_CLASS - describe a usb device with a specific interface class
++ * @vend: the 16 bit USB Vendor ID
++ * @prod: the 16 bit USB Product ID
++ * @cl: bInterfaceClass value
++ *
++ * This macro is used to create a struct usb_device_id that matches a
++ * specific interface class of devices.
++ */
++#define USB_DEVICE_INTERFACE_CLASS(vend, prod, cl) \
++	.match_flags = USB_DEVICE_ID_MATCH_DEVICE | \
++		        USB_DEVICE_ID_MATCH_INT_CLASS, \
++	.idVendor = (vend), \
++	.idProduct = (prod), \
++	.bInterfaceClass = (cl)
++
++/**
+  * USB_DEVICE_INTERFACE_PROTOCOL - describe a usb device with a specific interface protocol
+  * @vend: the 16 bit USB Vendor ID
+  * @prod: the 16 bit USB Product ID
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -1680,6 +1680,20 @@ static const struct usb_device_id option
+ 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+ 	{ USB_DEVICE(CHANGHONG_VENDOR_ID, CHANGHONG_PRODUCT_CH690) },
+ #endif
++
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d01, 0xff, 0x02, 0x01) },	/* D-Link DWM-156 (variant) */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d01, 0xff, 0x00, 0x00) },	/* D-Link DWM-156 (variant) */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d02, 0xff, 0x02, 0x01) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d02, 0xff, 0x00, 0x00) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d03, 0xff, 0x02, 0x01) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d03, 0xff, 0x00, 0x00) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d0e, 0xff, 0x02, 0x01) },	/* D-Link DWM-157 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d0e, 0xff, 0x00, 0x00) },	/* D-Link DWM-157 */
++	{ USB_DEVICE_INTERFACE_CLASS(0x2001, 0x7e19, 0xff),			/* D-Link DWM-221 B1 */
++	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e01, 0xff, 0xff, 0xff) }, /* D-Link DWM-152/C1 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e02, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/C1 */
++
+ 	{ } /* Terminating entry */
+ };
+ MODULE_DEVICE_TABLE(usb, option_ids);

@@ -1,0 +1,30 @@
+--- a/include/linux/init.h
++++ b/include/linux/init.h
+@@ -347,4 +347,7 @@ void __init parse_early_options(char *cm
+ #define __exit_p(x) NULL
+ #endif
+ 
++#ifndef __ASSEMBLY__
++extern char tch_board[8];
++#endif /* __ASSEMBLY__ */
+ #endif /* _LINUX_INIT_H */
+--- a/init/main.c
++++ b/init/main.c
+@@ -111,6 +111,17 @@ bool early_boot_irqs_disabled __read_mos
+ enum system_states system_state __read_mostly;
+ EXPORT_SYMBOL(system_state);
+ 
++/* Marker that is replaced in the final vmlinux binary file */
++char tch_board[8] = { "+TcHB+"  };
++EXPORT_SYMBOL(tch_board);
++
++static int __init setup_tch_board(char *s) {
++    strlcpy(tch_board, s, sizeof(tch_board));
++    return 1;
++}
++
++__setup("board=", setup_tch_board);
++
+ /*
+  * Boot command-line arguments
+  */

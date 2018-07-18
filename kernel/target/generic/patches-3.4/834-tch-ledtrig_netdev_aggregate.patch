@@ -1,0 +1,302 @@
+--- a/drivers/leds/ledtrig-netdev.c
++++ b/drivers/leds/ledtrig-netdev.c
+@@ -1,7 +1,7 @@
+ /*
+  * LED Kernel Netdev Trigger
+  *
+- * Toggles the LED to reflect the link and traffic state of a named net device
++ * Toggles the LED to reflect the aggregate link and traffic state of a set of net devices
+  *
+  * Copyright 2007 Oliver Jowett <oliver@opencloud.com>
+  *
+@@ -32,7 +32,7 @@
+ /*
+  * Configurable sysfs attributes:
+  *
+- * device_name - network device name to monitor
++ * device_name - network device names to monitor
+  *
+  * interval - duration of LED blink, in milliseconds
+  *
+@@ -45,12 +45,12 @@
+  *
+  *  Simple link status LED:
+  *  $ echo netdev >someled/trigger
+- *  $ echo eth0 >someled/device_name
++ *  $ echo "eth0 eth1" >someled/device_name
+  *  $ echo link >someled/mode
+  *
+  *  Ethernet-style link/activity LED:
+  *  $ echo netdev >someled/trigger
+- *  $ echo eth0 >someled/device_name
++ *  $ echo "eth0 eth1" >someled/device_name
+  *  $ echo "link tx rx" >someled/mode
+  *
+  *  Modem-style tx/rx LEDs:
+@@ -67,6 +67,8 @@
+ #define MODE_TX   2
+ #define MODE_RX   4
+ 
++#define MAX_NETDEVS 8
++
+ struct led_netdev_data {
+ 	spinlock_t lock;
+ 
+@@ -74,9 +76,9 @@ struct led_netdev_data {
+ 	struct notifier_block notifier;
+ 
+ 	struct led_classdev *led_cdev;
+-	struct net_device *net_dev;
++	struct net_device *net_dev[MAX_NETDEVS];
+ 
+-	char device_name[IFNAMSIZ];
++	char device_name[MAX_NETDEVS][IFNAMSIZ];
+ 	unsigned interval;
+ 	unsigned mode;
+ 	unsigned link_up;
+@@ -99,12 +101,32 @@ static ssize_t led_device_name_show(stru
+ {
+ 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+ 	struct led_netdev_data *trigger_data = led_cdev->trigger_data;
++	unsigned pos, index;
++
++	pos = 0;
++	buf[0] = 0;
+ 
+ 	spin_lock_bh(&trigger_data->lock);
+-	sprintf(buf, "%s\n", trigger_data->device_name);
++
++	for (index = 0; index < MAX_NETDEVS; index++) {
++		if (trigger_data->device_name[index][0] == 0)
++			break;
++
++		/* protection against buf overflow */
++		if (pos + strlen(trigger_data->device_name[index]) + 1 /* LF */ >= PAGE_SIZE)
++			break;
++
++		/* transform the last LF in space */
++		if (pos)
++			buf[pos - 1] = ' ';
++
++		pos += snprintf(buf + pos, PAGE_SIZE - pos, "%s\n", trigger_data->device_name[index]);
++	}
++
++
+ 	spin_unlock_bh(&trigger_data->lock);
+ 
+-	return strlen(buf) + 1;
++	return pos;
+ }
+ 
+ static ssize_t led_device_name_store(struct device *dev,
+@@ -112,25 +134,63 @@ static ssize_t led_device_name_store(str
+ {
+ 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+ 	struct led_netdev_data *trigger_data = led_cdev->trigger_data;
++	char copybuf[MAX_NETDEVS * IFNAMSIZ];
++	unsigned index, i;
++	char *p, *token;
+ 
+-	if (size < 0 || size >= IFNAMSIZ)
++	if (size < 0)
+ 		return -EINVAL;
+ 
++	/* take a copy since we don't want to trash the inbound buffer when using strsep */
++	strncpy(copybuf, buf, sizeof(copybuf));
++	copybuf[sizeof(copybuf) - 1] = 0;
++	p = copybuf;
++
+ 	cancel_delayed_work_sync(&trigger_data->work);
+ 
+ 	spin_lock_bh(&trigger_data->lock);
+ 
+-	strcpy(trigger_data->device_name, buf);
+-	if (size > 0 && trigger_data->device_name[size-1] == '\n')
+-		trigger_data->device_name[size-1] = 0;
++	index = 0;
+ 	trigger_data->link_up = 0;
+ 	trigger_data->last_activity = 0;
++	while ((token = strsep(&p, " \t\n")) != NULL) {
++		if (!*token)
++			continue;
++		if (strlen(token) >= IFNAMSIZ) {
++			size = -EINVAL;
++			break;
++		}
++
++		/* skip duplicate inteface names */
++		for (i = 0; i < index; i++) {
++		    if (strcmp(trigger_data->device_name[i], token) == 0)
++			break;
++		}
++		if (i != index)
++		    continue;
++
++		if (index >= MAX_NETDEVS) {
++			size = -E2BIG;
++			break;
++		}
++
++		strncpy(trigger_data->device_name[index], token, IFNAMSIZ);
++		if (trigger_data->net_dev[index] != NULL)
++			dev_put(trigger_data->net_dev[index]);
+ 
+-	if (trigger_data->device_name[0] != 0) {
+ 		/* check for existing device to update from */
+-		trigger_data->net_dev = dev_get_by_name(&init_net, trigger_data->device_name);
+-		if (trigger_data->net_dev != NULL)
+-			trigger_data->link_up = (dev_get_flags(trigger_data->net_dev) & IFF_LOWER_UP) != 0;
++		trigger_data->net_dev[index] = dev_get_by_name(&init_net, token);
++		if (trigger_data->net_dev[index] != NULL)
++			trigger_data->link_up |= (dev_get_flags(trigger_data->net_dev[index]) & IFF_LOWER_UP) != 0;
++		index++;
++	}
++	/* remove old interfaces */
++	for (; index < MAX_NETDEVS; index++) {
++		trigger_data->device_name[index][0] = 0;
++		if (trigger_data->net_dev[index] != NULL) {
++			dev_put(trigger_data->net_dev[index]);
++			trigger_data->net_dev[index] = NULL;
++		}
+ 	}
+ 
+ 	set_baseline_state(trigger_data);
+@@ -263,39 +323,50 @@ static int netdev_trig_notify(struct not
+ {
+ 	struct net_device *dev = dv;
+ 	struct led_netdev_data *trigger_data = container_of(nb, struct led_netdev_data, notifier);
++	unsigned index;
+ 
+ 	if (evt != NETDEV_UP && evt != NETDEV_DOWN && evt != NETDEV_CHANGE && evt != NETDEV_REGISTER && evt != NETDEV_UNREGISTER && evt != NETDEV_CHANGENAME)
+ 		return NOTIFY_DONE;
+ 
+-	if (strcmp(dev->name, trigger_data->device_name))
++	for (index = 0; index < MAX_NETDEVS; index++) {
++		if (trigger_data->device_name[index][0] == 0)
++			return NOTIFY_DONE;
++
++		if (strcmp(dev->name, trigger_data->device_name[index]) == 0)
++			break;
++	}
++	if (index >= MAX_NETDEVS)
+ 		return NOTIFY_DONE;
+ 
+-	cancel_delayed_work_sync(&trigger_data->work);
++        cancel_delayed_work_sync(&trigger_data->work);
+ 
+-	spin_lock_bh(&trigger_data->lock);
++        spin_lock_bh(&trigger_data->lock);
+ 
+ 	if (evt == NETDEV_REGISTER || evt == NETDEV_CHANGENAME) {
+-		if (trigger_data->net_dev != NULL)
+-			dev_put(trigger_data->net_dev);
++		if (trigger_data->net_dev[index] != NULL)
++			dev_put(trigger_data->net_dev[index]);
+ 
+ 		dev_hold(dev);
+-		trigger_data->net_dev = dev;
+-		trigger_data->link_up = 0;
+-		goto done;
++		trigger_data->net_dev[index] = dev;
+ 	}
+-
+-	if (evt == NETDEV_UNREGISTER && trigger_data->net_dev != NULL) {
+-		dev_put(trigger_data->net_dev);
+-		trigger_data->net_dev = NULL;
+-		goto done;
++	else if (evt == NETDEV_UNREGISTER && trigger_data->net_dev[index] != NULL) {
++		dev_put(trigger_data->net_dev[index]);
++		trigger_data->net_dev[index] = NULL;
+ 	}
+ 
+ 	/* UP / DOWN / CHANGE */
+ 
+-	trigger_data->link_up = (evt != NETDEV_DOWN && netif_carrier_ok(dev));
++	trigger_data->link_up = 0;
++	for (index = 0; index < MAX_NETDEVS; index++) {
++		if (trigger_data->net_dev[index] == NULL)
++			continue;
++		if (trigger_data->net_dev[index] == dev)
++			trigger_data->link_up |= (evt != NETDEV_REGISTER && evt != NETDEV_DOWN && netif_carrier_ok(dev));
++		else
++			trigger_data->link_up |= ((dev_get_flags(trigger_data->net_dev[index]) & IFF_LOWER_UP) != 0);
++	}
+ 	set_baseline_state(trigger_data);
+ 
+-done:
+ 	spin_unlock_bh(&trigger_data->lock);
+ 	return NOTIFY_DONE;
+ }
+@@ -307,19 +378,28 @@ static void netdev_trig_work(struct work
+ 	struct rtnl_link_stats64 *dev_stats;
+ 	unsigned new_activity;
+ 	struct rtnl_link_stats64 temp;
++	unsigned index;
++	struct net_device *nd_tmp;
++	const unsigned mode = trigger_data->mode;
+ 
+-	if (!trigger_data->link_up || !trigger_data->net_dev || (trigger_data->mode & (MODE_TX | MODE_RX)) == 0) {
++	if (!trigger_data->link_up || (mode & (MODE_TX | MODE_RX)) == 0) {
+ 		/* we don't need to do timer work, just reflect link state. */
+-		led_set_brightness(trigger_data->led_cdev, ((trigger_data->mode & MODE_LINK) != 0 && trigger_data->link_up) ? LED_FULL : LED_OFF);
++		led_set_brightness(trigger_data->led_cdev, ((mode & MODE_LINK) != 0 && trigger_data->link_up) ? LED_FULL : LED_OFF);
+ 		return;
+ 	}
+ 
+-	dev_stats = dev_get_stats(trigger_data->net_dev, &temp);
+-	new_activity =
+-		((trigger_data->mode & MODE_TX) ? dev_stats->tx_packets : 0) +
+-		((trigger_data->mode & MODE_RX) ? dev_stats->rx_packets : 0);
++	new_activity = 0;
++	for (index = 0; index < MAX_NETDEVS; index++) {
++		nd_tmp = trigger_data->net_dev[index];
++		if (nd_tmp == NULL)
++			continue;
++		dev_stats = dev_get_stats(nd_tmp, &temp);
++		new_activity +=
++			((mode & MODE_TX) ? dev_stats->tx_packets : 0) +
++			((mode & MODE_RX) ? dev_stats->rx_packets : 0);
++	}
+ 
+-	if (trigger_data->mode & MODE_LINK) {
++	if (mode & MODE_LINK) {
+ 		/* base state is ON (link present) */
+ 		/* if there's no link, we don't get this far and the LED is off */
+ 
+@@ -362,13 +442,7 @@ static void netdev_trig_activate(struct
+ 	INIT_DELAYED_WORK(&trigger_data->work, netdev_trig_work);
+ 
+ 	trigger_data->led_cdev = led_cdev;
+-	trigger_data->net_dev = NULL;
+-	trigger_data->device_name[0] = 0;
+-
+-	trigger_data->mode = 0;
+ 	trigger_data->interval = msecs_to_jiffies(50);
+-	trigger_data->link_up = 0;
+-	trigger_data->last_activity = 0;
+ 
+ 	led_cdev->trigger_data = trigger_data;
+ 
+@@ -397,6 +471,7 @@ err_out:
+ static void netdev_trig_deactivate(struct led_classdev *led_cdev)
+ {
+ 	struct led_netdev_data *trigger_data = led_cdev->trigger_data;
++	unsigned index;
+ 
+ 	if (trigger_data) {
+ 		unregister_netdevice_notifier(&trigger_data->notifier);
+@@ -409,9 +484,11 @@ static void netdev_trig_deactivate(struc
+ 
+ 		spin_lock_bh(&trigger_data->lock);
+ 
+-		if (trigger_data->net_dev) {
+-			dev_put(trigger_data->net_dev);
+-			trigger_data->net_dev = NULL;
++		for (index = 0; index < MAX_NETDEVS; index++) {
++			if (trigger_data->net_dev[index] == NULL)
++				continue;
++			dev_put(trigger_data->net_dev[index]);
++			trigger_data->net_dev[index] = NULL;
+ 		}
+ 
+ 		spin_unlock_bh(&trigger_data->lock);

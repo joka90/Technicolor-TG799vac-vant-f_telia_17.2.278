@@ -1,0 +1,87 @@
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -1696,6 +1696,12 @@ static const struct usb_device_id option
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e01, 0xff, 0xff, 0xff) }, /* D-Link DWM-152/C1 */
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e02, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/C1 */
+ 
++	{ USB_DEVICE(0x05C6, 0x9090) }, /* Quectel UC15 */
++	{ USB_DEVICE(0x05C6, 0x9003) }, /* Quectel UC20 */
++	{ USB_DEVICE(0x05C6, 0x9215) }, /* Quectel EC20 */
++	{ USB_DEVICE(0x2C7C, 0x0125) }, /* Quectel EC25 */
++	{ USB_DEVICE(0x2C7C, 0x0121) }, /* Quectel EC21 */
++
+ 	{ } /* Terminating entry */
+ };
+ MODULE_DEVICE_TABLE(usb, option_ids);
+@@ -1742,6 +1748,9 @@ static struct usb_serial_driver option_1
+ #ifdef CONFIG_PM
+ 	.suspend           = usb_wwan_suspend,
+ 	.resume            = usb_wwan_resume,
++#if 1 //Added by Quectel
++	.reset_resume = usb_wwan_resume,
++#endif
+ #endif
+ };
+ 
+@@ -1810,6 +1819,23 @@ static int option_probe(struct usb_seria
+ 		serial->interface->cur_altsetting->desc.bInterfaceClass != USB_CLASS_CDC_DATA)
+ 		return -ENODEV;
+ 
++#if 1 //Added by Quectel
++	//Quectel UC20's interface 4 can be used as USB Network device
++	if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
++		serial->dev->descriptor.idProduct == cpu_to_le16(0x9003) &&
++		serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
++		return -ENODEV;
++	//Quectel EC20's interface 4 can be used as USB Network device
++	if (serial->dev->descriptor.idVendor == cpu_to_le16(0x05C6) &&
++		serial->dev->descriptor.idProduct == cpu_to_le16(0x9215) &&
++		serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
++		return -ENODEV;
++	//Quectel EC25&EC21's interface 4 can be used as USB Network device
++	if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C) &&
++		serial->interface->cur_altsetting->desc.bInterfaceNumber >= 4)
++		return -ENODEV;
++#endif
++
+ 	data = serial->private = kzalloc(sizeof(struct usb_wwan_intf_private), GFP_KERNEL);
+ 	if (!data)
+ 		return -ENOMEM;
+--- a/drivers/usb/serial/qcserial.c
++++ b/drivers/usb/serial/qcserial.c
+@@ -73,7 +73,7 @@ static const struct usb_device_id id_tab
+ 	{USB_DEVICE(0x03f0, 0x241d)},	/* HP Gobi 2000 QDL device (VP412) */
+ 	{USB_DEVICE(0x03f0, 0x251d)},	/* HP Gobi 2000 Modem device (VP412) */
+ 	{USB_DEVICE(0x05c6, 0x9214)},	/* Acer Gobi 2000 QDL device (VP413) */
+-	{USB_DEVICE(0x05c6, 0x9215)},	/* Acer Gobi 2000 Modem device (VP413) */
++	// Removed by Quectel {USB_DEVICE(0x05c6, 0x9215)},	/* Acer Gobi 2000 Modem device (VP413) */
+ 	{USB_DEVICE(0x05c6, 0x9264)},	/* Asus Gobi 2000 QDL device (VR305) */
+ 	{USB_DEVICE(0x05c6, 0x9265)},	/* Asus Gobi 2000 Modem device (VR305) */
+ 	{USB_DEVICE(0x05c6, 0x9234)},	/* Top Global Gobi 2000 QDL device (VR306) */
+--- a/drivers/usb/serial/usb-serial.c
++++ b/drivers/usb/serial/usb-serial.c
+@@ -50,6 +50,9 @@ static struct usb_driver usb_serial_driv
+ 	.disconnect =	usb_serial_disconnect,
+ 	.suspend =	usb_serial_suspend,
+ 	.resume =	usb_serial_resume,
++#if 1 //Added by Quectel
++	.reset_resume = usb_serial_resume,
++#endif
+ 	.no_dynamic_id =	1,
+ 	.supports_autosuspend =	1,
+ };
+--- a/drivers/usb/class/cdc-acm.c
++++ b/drivers/usb/class/cdc-acm.c
+@@ -1241,6 +1241,12 @@ made_compressed_probe:
+ 				usb_sndbulkpipe(usb_dev, epwrite->bEndpointAddress),
+ 				NULL, acm->writesize, acm_write_bulk, snd);
+ 		snd->urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
++
++#if 1 //Added by Quectel for Zero Packet
++		if (usb_dev->descriptor.idVendor == 0x1519 && usb_dev->descriptor.idProduct == 0x0020)
++			snd->urb->transfer_flags |= URB_ZERO_PACKET;
++#endif
++
+ 		snd->instance = acm;
+ 	}
+ 

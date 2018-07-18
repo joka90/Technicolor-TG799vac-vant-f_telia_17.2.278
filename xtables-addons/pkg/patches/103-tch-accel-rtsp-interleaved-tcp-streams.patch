@@ -1,0 +1,113 @@
+diff -Nru --show-c-function a/extensions/rtsp/nf_conntrack_rtsp.c b/extensions/rtsp/nf_conntrack_rtsp.c
+--- a/extensions/rtsp/nf_conntrack_rtsp.c	2017-06-09 12:43:18.400465051 +0200
++++ b/extensions/rtsp/nf_conntrack_rtsp.c	2017-06-09 12:55:41.349114716 +0200
+@@ -18,6 +18,9 @@
+  * 2015-04-16: Fan Wei <wei.fan@technicolor.com>, Tan Xiu Juan <xiujuan.tan@technicolor.com>
+  *  - update the rtsp exp-connt's src IP
+  *  - if it's updated in the REPLY message
++ * 2017-06-02: Alin Nastac <alin.nastac at technicolor.com>
++ *      - unbind this helper from conntracks using interleaved TCP transport mode (aka RTSP over TCP),
++ *        so that RTSP stream could be accelerated on Broadcom platforms
+  *
+  * based on ip_conntrack_irc.c
+  *
+@@ -46,6 +49,7 @@
+ #include <net/tcp.h>
+ 
+ #include <net/netfilter/nf_conntrack.h>
++#include <net/netfilter/nf_conntrack_helper.h>
+ #include <net/netfilter/nf_conntrack_expect.h>
+ #include <net/netfilter/nf_conntrack_helper.h>
+ #include <net/netfilter/nf_conntrack_zones.h>
+@@ -190,6 +194,7 @@ rtsp_parse_transport(char* ptran, uint t
+ {
+ 	int  rc = 0;
+ 	uint off = 0;
++	int tranfield, trantcp;
+ 	
+ 	if (tranlen < 10 || !iseol(ptran[tranlen-1]) ||
+ 	    nf_strncasecmp(ptran, "Transport:", 10) != 0) {
+@@ -209,6 +214,8 @@ rtsp_parse_transport(char* ptran, uint t
+ 		pparamend = memchr(ptran+off, ',', tranlen-off);
+ 		pparamend = (pparamend == NULL) ? ptran+tranlen : pparamend+1;
+ 		nextparamoff = pparamend-ptran;
++		tranfield = 1;
++		trantcp = 0;
+ 		
+ 		while (off < nextparamoff) {
+ 			const char* pfieldend;
+@@ -216,8 +223,25 @@ rtsp_parse_transport(char* ptran, uint t
+ 			
+ 			pfieldend = memchr(ptran+off, ';', nextparamoff-off);
+ 			nextfieldoff = (pfieldend == NULL) ? nextparamoff : pfieldend-ptran+1;
++			SKIP_WSPACE(ptran, nextfieldoff, off);
+ 		   
+-			if (strncmp(ptran+off, "client_port=", 12) == 0) {
++			if (tranfield) {
++				const char* psep = memchr(ptran+off, '/', nextfieldoff-off);
++
++				if (psep != NULL) {
++					off = psep - ptran + 1;
++					psep = (off < nextparamoff) ? memchr(ptran+off, '/', nextfieldoff-off) : NULL;
++					if (psep != NULL) {
++						off = psep - ptran + 1;
++						trantcp = nextfieldoff - off >= 3 && strncmp(ptran+off, "TCP", 3) == 0;
++					}
++				}
++				tranfield = 0;
++			}
++			else if (trantcp && nextfieldoff - off > 12 && strncmp(ptran+off, "interleaved=", 12) == 0) {
++				prtspexp->tcpinterleaved = 1;
++			}
++			else if (nextfieldoff - off > 12 && strncmp(ptran+off, "client_port=", 12) == 0) {
+ 				u_int16_t   port;
+ 				uint        numlen;
+ 
+@@ -255,8 +279,7 @@ rtsp_parse_transport(char* ptran, uint t
+ 					rc = 1;
+ 				}
+ 			}
+-			
+-			else if (strncmp(ptran+off, "source=", 7) == 0) {
++			else if (nextfieldoff - off > 8 && strncmp(ptran+off, "source=", 7) == 0) {
+ 				char szsrcaddr[INET6_ADDRSTRLEN] = {0}; /* Ensure the string can accommodate both IPv4 and IPv6 addr string */
+ 				uint srcaddrlen = 0;
+ 
+@@ -559,6 +582,26 @@ help_in(struct sk_buff *skb, unsigned ch
+ 			rtsp_parse_transport(pdata+transoff, translen, &expinfo);
+ 			srvaddr = expinfo.srvaddr;
+ 
++			if (expinfo.tcpinterleaved) {
++				struct nf_conn_help *help = nfct_help(ct);
++				const char *pos;
++				u_int16_t code;
++
++				if (help != NULL &&
++				    (pos = memchr(pdata+cmdoff+5, ' ', hdrsoff-cmdoff-5)) != NULL &&
++				    nf_strtou16(pos+1, &code) > 0 &&
++				    code >= 200 && code < 300) {
++					/* Detach RTSP helper from conntrack when interleaved TCP transport mode is detected,
++					 * so that video data might go through accelerated path */
++					pr_debug("unbind rtsp helper, tcp interleaved stream play about to start\n");
++					RCU_INIT_POINTER(help->helper, NULL);
++#if defined(CONFIG_BCM_KF_BLOG) && defined(CONFIG_BLOG)
++					set_bit(IPS_BLOG_BIT, &ct->status);
++#endif
++					return ret;
++				}
++			}
++
+ 			if (nf_inet_addr_cmp(&srvaddr, &ct->tuplehash[dir].tuple.src.u3) ||
+ 					(nf_inet_addr_cmp(&srvaddr, &emptaddr)))
+ 				continue;
+diff -Nru --show-c-function a/extensions/rtsp/nf_conntrack_rtsp.h b/extensions/rtsp/nf_conntrack_rtsp.h
+--- a/extensions/rtsp/nf_conntrack_rtsp.h	2017-06-09 12:43:18.380464359 +0200
++++ b/extensions/rtsp/nf_conntrack_rtsp.h	2017-06-09 12:45:14.776464519 +0200
+@@ -53,6 +53,7 @@ struct ip_ct_rtsp_expect
+     uint        cseq;       /* CSeq from request */
+ #endif
+     union nf_inet_addr srvaddr; /* src address in SETUP reply */
++    int		tcpinterleaved; /* interleaved TCP transport mode (RFC 2326 chapter 10.12) */
+ };
+ 
+ extern unsigned int (*nf_nat_rtsp_hook)(struct sk_buff *skb,

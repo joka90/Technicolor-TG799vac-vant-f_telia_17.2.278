@@ -1,0 +1,42 @@
+config ipset 'trusted_network'
+	option storage 'hash'
+	list match 'src_ip'
+	option enabled '1'
+	option family 'ipv4'
+
+config ipset_entry 'trusted_networkentry1'
+	option ip '212.166.209.18'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry2'
+	option ip '62.87.30.66'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry3'
+	option ip '212.145.159.217'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry4'
+	option ip '212.145.128.146'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry5'
+	option ip '212.145.159.136'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry6'
+	option ip '212.145.4.192/26'
+	option ipset 'trusted_network'
+ 
+config ipset_entry 'trusted_networkentry7'
+	option ip '212.145.159.160/27'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry8'
+	option ip '87.235.205.0/24'
+	option ipset 'trusted_network'
+
+config ipset_entry 'trusted_networkentry9'
+	option ip '217.130.174.0/24'
+	option ipset 'trusted_network'
+

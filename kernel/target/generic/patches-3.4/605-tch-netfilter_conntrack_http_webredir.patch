@@ -1,0 +1,1245 @@
+--- /dev/null
++++ b/include/linux/netfilter/nf_conntrack_http.h
+@@ -0,0 +1,66 @@
++#ifndef _NF_CONNTRACK_HTTP_H
++#define _NF_CONNTRACK_HTTP_H
++/* HTTP tracking. */
++
++#define NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS  25
++#define NF_CT_HTTP_MAX_FILTER_KEYWORD_LEN  20
++
++enum webredir_action{
++	WEBREDIR_ACT_NONE = 0,
++	WEBREDIR_ACT_REDIR,
++	WEBREDIR_ACT_ACCEPT,
++	WEBREDIR_ACT_DROP,
++	WEBREDIR_ACT_SKIP
++};
++
++enum webredir_redir_state{
++	WEBREDIR_STS_NONE = 0,
++	WEBREDIR_STS_TO_REDIR,    /* given config mark value found in CT, to redirect it */
++	WEBREDIR_STS_REDIRED,     /* reply content modified by webredir/nf_conntrack_http */
++	WEBREDIR_STS_RSTED,  /* browser replied ack after received modified packet */
++	WEBREDIR_STS_SVR_FIN,    /* svr to fin TCP connection */
++	WEBREDIR_STS_FAKE_FIN_WAIT1,
++	WEBREDIR_STS_FAKE_FIN_WAIT2,
++	WEBREDIR_STS_FAKE_CLOSED,
++	WEBREDIR_STS_TO_UNHELP,
++	WEBREDIR_STS_UNHELPED,
++	WEBREDIR_STS_ACCEPT
++};
++
++enum webredir_ipt_dir{  WEBREDIR_IPT_IN = 0,
++        WEBREDIR_IPT_OUT,
++	WEBREDIR_IPT_DIR_NUM
++};
++
++enum webredir_from{
++        WEBREDIR_FROM_CLNT = 0,
++        WEBREDIR_FROM_SVR,
++	WEBREDIR_FROM_NUM
++};
++
++
++#ifdef __KERNEL__
++
++#define HTTP_PORT	80
++
++struct nf_ct_http_tcp_info{
++	u32 seq;
++	u32 ack_seq;
++	u32 tcp_data_len;
++	u8  is_fin:1,
++	    is_syn:1,
++	    is_inited:1,
++	    is_url_request:1;
++};
++
++/* This structure exists only once per master */
++struct nf_ct_http_master {
++	enum webredir_action action;
++	enum webredir_redir_state state;
++	struct nf_ct_http_tcp_info tcp_info[WEBREDIR_IPT_DIR_NUM][WEBREDIR_FROM_NUM];
++};
++
++
++#endif /* __KERNEL__ */
++
++#endif /* _NF_CONNTRACK_HTTP_H */
+--- a/include/net/netfilter/nf_conntrack.h
++++ b/include/net/netfilter/nf_conntrack.h
+@@ -50,6 +50,7 @@ union nf_conntrack_expect_proto {
+ 
+ /* Add protocol helper include file here */
+ #include <linux/netfilter/nf_conntrack_ftp.h>
++#include <linux/netfilter/nf_conntrack_http.h>
+ #include <linux/netfilter/nf_conntrack_pptp.h>
+ #include <linux/netfilter/nf_conntrack_h323.h>
+ #include <linux/netfilter/nf_conntrack_sane.h>
+@@ -69,6 +70,9 @@ union nf_conntrack_help {
+ #if defined(CONFIG_NF_CONNTRACK_FTP) || defined(CONFIG_NF_CONNTRACK_FTP_MODULE)
+ 	struct nf_ct_ftp_master ct_ftp_info;
+ #endif
++#if defined(CONFIG_NF_CONNTRACK_HTTP) || defined(CONFIG_NF_CONNTRACK_HTTP_MODULE)
++        struct nf_ct_http_master ct_http_info;
++#endif
+ #if defined(CONFIG_NF_CONNTRACK_PPTP) || \
+     defined(CONFIG_NF_CONNTRACK_PPTP_MODULE)
+ 	struct nf_ct_pptp_master ct_pptp_info;
+--- a/net/netfilter/Kconfig
++++ b/net/netfilter/Kconfig
+@@ -198,6 +198,19 @@ config NF_CONNTRACK_FTP
+ 
+ 	  To compile it as a module, choose M here.  If unsure, say N.
+ 
++config NF_CONNTRACK_HTTP
++	tristate "HTTP protocol support"
++	depends on PROC_FS
++	default m if NETFILTER_ADVANCED=n
++	help
++	  It's a HTTP redirection module, used for parental control feature
++	  if it's enabled, and configurated, it can redirect HTTP stream to a given
++	  page( warning page or some public WEB site like yahoo.com).
++	  It will modify the server reply package, and replace the content to the given
++	  page content.
++
++          To compile it as a module, choose M here.  If unsure, say N.
++
+ config NF_CONNTRACK_H323
+ 	tristate "H.323 protocol support"
+ 	depends on (IPV6 || IPV6=n)
+--- a/net/netfilter/Makefile
++++ b/net/netfilter/Makefile
+@@ -45,6 +45,7 @@ obj-$(CONFIG_NF_CONNTRACK_SNMP) += nf_co
+ obj-$(CONFIG_NF_CONNTRACK_PPTP) += nf_conntrack_pptp.o
+ obj-$(CONFIG_NF_CONNTRACK_SANE) += nf_conntrack_sane.o
+ obj-$(CONFIG_NF_CONNTRACK_SIP) += nf_conntrack_sip.o
++obj-$(CONFIG_NF_CONNTRACK_HTTP) += nf_conntrack_http.o
+ obj-$(CONFIG_NF_CONNTRACK_TFTP) += nf_conntrack_tftp.o
+ ifdef BCM_KF # defined(CONFIG_BCM_KF_NETFILTER)
+ obj-$(CONFIG_NF_CONNTRACK_RTSP) += nf_conntrack_rtsp.o
+--- /dev/null
++++ b/net/netfilter/nf_conntrack_http.c
+@@ -0,0 +1,1121 @@
++/* HTTP extension for connection tracking.
++ * to redirect HTTP request to given URL */
++
++/* (C) 2015  Technicolor <linuxgw@technicolor.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/netfilter.h>
++#include <linux/ip.h>
++#include <linux/slab.h>
++#include <linux/ipv6.h>
++#include <linux/ctype.h>
++#include <linux/inet.h>
++#include <net/checksum.h>
++#include <net/tcp.h>
++
++#include <net/netfilter/nf_conntrack.h>
++#include <net/netfilter/nf_conntrack_ecache.h>
++#include <net/netfilter/nf_conntrack_extend.h>
++#include <net/netfilter/nf_conntrack_helper.h>
++#include <linux/netfilter/nf_conntrack_http.h>
++
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Mi Feng <feng.mi@technicolor.com>");
++MODULE_DESCRIPTION("HTTP connection tracking helper");
++MODULE_ALIAS("ip_conntrack_http");
++MODULE_ALIAS_NFCT_HELPER("http");
++
++#define WEBREDIR_ERR_HEAD "[nf_conntrack_http]"
++
++#define is_hex_num(i) ((i >= '0' && i <= '9') || (i >= 'a' && i <= 'f') || (i >= 'A' && i <= 'F'))
++
++static rwlock_t nf_http_lock;
++static DEFINE_SPINLOCK(counter_lock);
++
++#define WEBREDIR_SEQ_FILE_MAX_SIZE  2500
++#define MAX_PORTS 8
++
++static u_int16_t ports[MAX_PORTS];
++static unsigned int ports_c;
++module_param_array(ports, ushort, &ports_c, 0400);
++
++static unsigned int keyword_match_cnt[NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS];
++
++enum webredir_proc_cfg_section{
++        PROC_CFG_SEC_GLOBAL,
++        PROC_CFG_SEC_WEB_REDIR,
++        PROC_CFG_SEC_HTTP_FILTER,
++        PROC_CFG_SEC_NUM
++};
++
++static char proc_cfg_section_names[][15] = {"[global]", "[webredirect]", "[httpfilter]"};
++
++static struct webredir_cfg{
++	bool ipv4_enable;
++	bool ipv6_enable;
++	bool http_filter_enable;
++	__u32 redir_mark_value;
++	__u32 accept_mark_value;
++	__u32 skip_mark_value;
++	__u32 mark_mask_value;
++	char *redir_html;
++	char filter_keywords[NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS][NF_CT_HTTP_MAX_FILTER_KEYWORD_LEN];
++} g_webredir_cfg;
++
++static struct nf_ct_http_tcp_info *get_last_tcp_info_point(struct nf_ct_http_master *ct_http_info, enum webredir_ipt_dir dir, enum webredir_from from)
++{
++	return &(ct_http_info->tcp_info[dir][from]);
++}
++
++/* if not disorder, return 0; if retry, return 1, else return -1*/
++static int is_tcp_disorder(struct nf_ct_http_master *ct_http_info, struct sk_buff *skb, enum webredir_from from)
++{
++	struct nf_ct_http_tcp_info *last_point = NULL;
++	struct tcphdr *tcph = NULL;
++	u32 t = 0;
++	u32 seq = 0;
++	u32 data_len = 0;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -1;
++
++	last_point = get_last_tcp_info_point(ct_http_info, WEBREDIR_IPT_IN, from);
++
++	if (!last_point->is_inited)
++		return 0;
++
++	seq = ntohl(tcph->seq);
++
++	if (last_point->is_syn || last_point->is_fin)
++		t = 1;
++
++	data_len = skb_tail_pointer(skb) - ((unsigned char *)tcph + tcp_hdrlen(skb));
++
++	if (seq == last_point->seq + last_point->tcp_data_len + t)
++		return 0;
++	else if (seq == last_point->seq && data_len == last_point->tcp_data_len)
++		return 1;
++	else
++		return -1;
++}
++
++
++static int enlarge_skb(struct sk_buff *skb, unsigned int extra)
++{
++	if (unlikely(skb->len + extra > 65535))
++		return -1;
++
++	if (pskb_expand_head(skb, 0, extra - skb_tailroom(skb), GFP_ATOMIC))
++		return -1;
++
++	return 0;
++}
++
++static int upd_tcp_csum(struct sk_buff *skb, struct nf_conn *ct)
++{
++	struct tcphdr *tcph;
++	int tcplen;
++	u_int16_t l3_proto = nf_ct_l3num(ct);
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -EFAULT;
++
++	tcph->check = htons(0);
++	tcplen = (void *)skb_tail_pointer(skb) - (void *)tcph;
++
++	if (l3_proto == AF_INET) {
++		/* IP v4  */
++		struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
++		if (unlikely(iph == NULL))
++			return -EFAULT;
++	
++		tcph->check = csum_tcpudp_magic(iph->saddr, iph->daddr,  tcplen, iph->protocol, csum_partial((void *)tcph, tcplen, 0));
++	} else if (l3_proto == AF_INET6) {
++		/*  IP v6 */
++		struct ipv6hdr *ip6_hdr = ipv6_hdr(skb);
++		if (unlikely(ip6_hdr == NULL))
++			return -EFAULT;
++		
++		tcph->check = csum_ipv6_magic(&ip6_hdr->saddr, &ip6_hdr->daddr, tcplen, ip6_hdr->nexthdr, csum_partial((void *)tcph, tcplen, 0));
++	}
++	return 0;
++}
++
++/*  replace the content of this skb, and update tcp fields */
++static int replace_http_content(struct sk_buff *skb,
++				struct nf_conn *ct,
++				unsigned int protoff,
++				const char *rep_buffer,
++				unsigned int rep_len)
++{
++	unsigned int dataoff, datalen;
++	struct tcphdr *tcph;
++	int tmp;
++
++	tmp = skb_linearize(skb);
++	if (unlikely(tmp))
++		return tmp;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -EFAULT;
++
++	dataoff = protoff + tcph->doff * 4;
++	datalen = skb->len - dataoff;
++
++	if (unlikely(!skb_make_writable(skb, skb->len)))
++		return -EFAULT;
++
++	if (rep_len > datalen && skb_tailroom(skb) < rep_len - datalen) {
++		if (enlarge_skb(skb, rep_len - datalen)) {
++			pr_err(WEBREDIR_ERR_HEAD"can not enlarge skb size error %d <= %d\r\n", datalen, rep_len);
++			return -EFBIG;
++		}
++	}
++
++	if (skb_is_nonlinear(skb))
++	{
++		return -EFAULT;
++	}
++
++	/* to update the header pointer */
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -EFAULT;
++
++	/* Overwrite all data in buffer */
++	skb_copy_to_linear_data_offset(skb, dataoff, rep_buffer, rep_len);
++
++	/* update skb info */
++	if (rep_len > datalen) {
++		pr_debug(WEBREDIR_ERR_HEAD " Redirected CT[%p] by "
++				 "%u from %u bytes\n", ct, rep_len - datalen, skb->len);
++		skb_put(skb, rep_len - datalen);
++	}
++	else if (rep_len < datalen) {
++		pr_debug(WEBREDIR_ERR_HEAD " Redirected CT[%p] from "
++				 "%u from %u bytes\n", ct, datalen - rep_len, skb->len);
++		__skb_trim(skb, skb->len - datalen + rep_len);
++	}
++
++	return upd_tcp_csum(skb, ct);
++}
++
++static inline bool l3_proto_enabled(struct nf_conn * ct, struct webredir_cfg * cfg)
++{
++	u_int16_t l3_proto = nf_ct_l3num(ct);
++
++	if (l3_proto == AF_INET && cfg->ipv4_enable)
++		return true;
++	else if (l3_proto == AF_INET6 && cfg->ipv6_enable)
++		return true;
++	else
++		return false;
++}
++
++static void upd_last_pkt_tcp_info(struct nf_ct_http_master *ct_http_info, struct sk_buff *skb, enum webredir_ipt_dir dir, enum webredir_from from)
++{
++	const struct tcphdr *tcph = tcp_hdr(skb);
++	struct nf_ct_http_tcp_info * tmp = get_last_tcp_info_point(ct_http_info, dir, from);
++
++	if (unlikely(tcph == NULL))
++		return;
++
++	tmp->ack_seq = ntohl(tcph->ack_seq);
++	tmp->seq = ntohl(tcph->seq);
++	tmp->tcp_data_len = skb_tail_pointer(skb) - ((unsigned char *)tcph + tcph->doff * 4);
++	tmp->is_fin = (tcph->fin ? 1 : 0);
++	tmp->is_syn = (tcph->syn ? 1 : 0);
++	tmp->is_inited = 1;
++	tmp->is_url_request = 0;
++}
++
++/* update seq and ack_seq in this skb, according to the last packet info
++ *  * is_skb_to_svr: the direction of this skb, to send to server side, 1; to clinet side, 0 */
++static void upd_skb_based_on_last_pkts(struct sk_buff *skb, int is_skb_to_svr, struct nf_conn *ct)
++{
++	struct nf_ct_http_tcp_info *tcp_info = NULL;
++	struct nf_ct_http_master *ct_http_info = &nfct_help(ct)->help.ct_http_info;
++
++	struct tcphdr *tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL || ct_http_info == NULL))
++		return;
++
++	/* adjust ack seq num */
++	tcp_info = get_last_tcp_info_point(ct_http_info, WEBREDIR_IPT_IN, (is_skb_to_svr ? WEBREDIR_FROM_SVR : WEBREDIR_FROM_CLNT));
++	if (tcp_info->is_inited) {
++		tcph->ack_seq = htonl(tcp_info->seq + tcp_info->tcp_data_len + (tcp_info->is_fin ? 1 : 0));
++		nf_conntrack_event_cache(IPCT_NATSEQADJ, ct);
++	}
++
++	/* adjust seq num */
++	tcp_info = get_last_tcp_info_point(ct_http_info, WEBREDIR_IPT_OUT, (is_skb_to_svr ? WEBREDIR_FROM_CLNT : WEBREDIR_FROM_SVR));
++	if (tcp_info->is_inited) {
++		tcph->seq = htonl(tcp_info->seq + tcp_info->tcp_data_len + (tcp_info->is_fin ? 1 : 0));
++		nf_conntrack_event_cache(IPCT_NATSEQADJ, ct);
++	}
++}
++
++static int empty_tcp_content(struct sk_buff *skb)
++{
++	unsigned int datalen;
++	struct tcphdr *tcph;
++	int tmp;
++
++	tmp = skb_linearize(skb);
++	if (unlikely(tmp))
++		return tmp;
++
++	if (unlikely(!skb_make_writable(skb, skb->len)))
++		return -EFAULT;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -EFAULT;
++
++	datalen = skb_tail_pointer(skb) - ((unsigned char *)tcph + tcph->doff * 4);
++
++	__skb_trim(skb, skb->len - datalen);
++
++	return 0;
++}
++
++static void fin_tcp_conn(struct sk_buff *skb)
++{
++	struct tcphdr *tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return;
++
++	tcph->rst = 0;
++	tcph->psh = 0;
++
++	tcph->fin = 1;
++
++	empty_tcp_content(skb);
++}
++
++static void upd_ip_header_fields(struct sk_buff *skb, struct nf_conn *ct)
++{
++	u_int16_t l3_proto = nf_ct_l3num(ct);
++
++	if (l3_proto == AF_INET) {
++		/* fix IP hdr checksum information */
++		ip_hdr(skb)->tot_len = htons(skb->len);
++		ip_send_check(ip_hdr(skb));
++	} else if (l3_proto == AF_INET6) {
++		struct ipv6hdr *ip6_hdr = ipv6_hdr(skb);
++		/* update payload length  */
++		ip6_hdr->payload_len = htons(skb_tail_pointer(skb) - (unsigned char *)ip6_hdr - sizeof(struct ipv6hdr));
++	}
++}
++
++/* forward this packet to client/browser side, after adjust seq num */
++static int adjust_seq_nums(struct sk_buff *skb, struct nf_conn *ct, int is_skb_to_svr, int is_to_empty_content)
++{
++	struct tcphdr *tcph;
++
++	if (is_to_empty_content && empty_tcp_content(skb) != 0)
++		return -EFAULT;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return -EFAULT;
++
++	if (unlikely(!skb_make_writable(skb, skb->len)))
++		return -EFAULT;
++
++	upd_skb_based_on_last_pkts(skb, is_skb_to_svr, ct);
++
++	if (likely(!upd_tcp_csum(skb, ct))) {
++		/* update IP header (v4/v6) */
++		upd_ip_header_fields(skb, ct);
++		return 0;
++	}
++
++	return -EFAULT;
++}
++
++static bool is_tcp_reset_flag_set(struct sk_buff *skb)
++{
++	struct tcphdr *tcph;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return false;
++
++	if (tcph->rst)
++		return true;
++	else
++		return false;
++}
++
++static bool is_tcp_fin_flag_set(struct sk_buff *skb)
++{
++	struct tcphdr *tcph;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return false;
++
++	if (tcph->fin)
++		return true;
++	else
++		return false;
++}
++
++static int handle_redir_stream_clnt_pkt_in(struct sk_buff *skb, struct nf_conn *ct, struct nf_ct_http_master *ct_http_info)
++{
++	int ret = NF_ACCEPT;
++
++	switch (ct_http_info->state) {
++	case WEBREDIR_STS_REDIRED:
++	case WEBREDIR_STS_SVR_FIN:
++		/* forward to server, after adjust seq numbers */
++		if (is_tcp_reset_flag_set(skb))
++			ct_http_info->state = WEBREDIR_STS_RSTED;
++
++		if (unlikely(adjust_seq_nums(skb, ct, 1, 1) != 0))
++			ret = NF_DROP;
++		break;
++
++	case WEBREDIR_STS_FAKE_FIN_WAIT1:
++		if (is_tcp_fin_flag_set(skb)) {
++			ct_http_info->state = WEBREDIR_STS_FAKE_FIN_WAIT2;
++		}
++
++	case WEBREDIR_STS_RSTED:
++	case WEBREDIR_STS_FAKE_CLOSED:
++	case WEBREDIR_STS_FAKE_FIN_WAIT2:
++		ret = NF_DROP;
++		break;
++
++	default:
++		break;
++	}
++
++	return ret;
++}
++
++/* if the server would fin this tcp connection, go on to close it
++ * if server want to send more packets, modify the first packet to reset this tcp connection
++ * */
++static int handle_svr_pkt_after_redired(struct sk_buff *skb, struct nf_conn *ct, struct nf_ct_http_master *ct_http_info)
++{
++	struct tcphdr *tcph;
++	int ret = 0;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(!tcph))
++		return NF_DROP;
++
++	if (tcph->fin) {
++		/* FIN packet, to forward it to client witout content  */
++		ret = adjust_seq_nums(skb, ct, 0, 1);
++		if (likely(!ret)) {
++			ct_http_info->state = WEBREDIR_STS_SVR_FIN;
++			return NF_ACCEPT;
++		}
++	} else {
++		/*  to modify this packet to send fake fin to browser */
++		fin_tcp_conn(skb);
++
++		upd_skb_based_on_last_pkts(skb, 0, ct);
++
++		upd_tcp_csum(skb, ct);
++
++		/* update IP header (v4/v6) */
++		upd_ip_header_fields(skb, ct);
++		ct_http_info->state = WEBREDIR_STS_FAKE_FIN_WAIT1;
++	}
++
++	return NF_ACCEPT;
++}
++
++static bool clean_tcp_fin_flag_set(struct sk_buff *skb)
++{
++	struct tcphdr *tcph;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return false;
++
++	tcph->fin = 0;
++	tcph->psh = 0;
++
++	return true;
++}
++
++
++static int handle_redir_stream_svr_pkt_in(struct sk_buff *skb, struct nf_conn *ct, unsigned int protoff, struct nf_ct_http_master *ct_http_info,
++	struct webredir_cfg *cfg)
++{
++	int ret = NF_ACCEPT;
++
++	switch (ct_http_info->state) {
++	case WEBREDIR_STS_RSTED:
++	case WEBREDIR_STS_FAKE_FIN_WAIT1:
++	case WEBREDIR_STS_FAKE_CLOSED:
++		ret = NF_DROP;
++		break;
++
++	case WEBREDIR_STS_REDIRED:
++		ret = handle_svr_pkt_after_redired(skb, ct, ct_http_info);
++		break;
++
++	case WEBREDIR_STS_TO_REDIR:
++		/* to modify this packet */
++		ret = replace_http_content(skb, ct, protoff, cfg->redir_html, strlen(cfg->redir_html));
++		if (likely(!ret)) {
++			upd_ip_header_fields(skb, ct);
++			ct_http_info->state = WEBREDIR_STS_REDIRED;
++			ret = NF_ACCEPT;
++			pr_debug(WEBREDIR_ERR_HEAD"HTTP request [conntrack: %p] is redirected\r\n", ct);
++		} else
++			ret = NF_DROP;
++		break;
++
++	case WEBREDIR_STS_SVR_FIN:
++		if (unlikely(adjust_seq_nums(skb, ct, 0, 1) != 0))
++			ret = NF_DROP;
++		else
++			ret = NF_ACCEPT;
++		break;
++
++	case WEBREDIR_STS_FAKE_FIN_WAIT2:
++		clean_tcp_fin_flag_set(skb);
++		/* forward fin-ack to client/browser */
++		if (unlikely(adjust_seq_nums(skb, ct, 0, 1) != 0))
++			ret = NF_DROP;
++		ct_http_info->state = WEBREDIR_STS_FAKE_CLOSED;
++		break;
++
++	default:
++		break;
++	}
++
++	return ret;
++}
++
++
++static void init_redir_info(struct nf_conn *ct, struct nf_ct_http_master *info, enum webredir_from from)
++{
++	struct nf_ct_http_tcp_info *tcp_info = get_last_tcp_info_point(info, WEBREDIR_IPT_IN, from);
++
++	if (tcp_info->is_syn)
++		return;
++
++	memset(info, 0, sizeof(struct nf_ct_http_master));
++	if ((ct->mark & g_webredir_cfg.mark_mask_value) == g_webredir_cfg.redir_mark_value) {
++		info->action = WEBREDIR_ACT_REDIR;
++		info->state = WEBREDIR_STS_TO_REDIR;
++		tcp_info->is_url_request = 1;
++	} else if ((ct->mark & g_webredir_cfg.mark_mask_value) == g_webredir_cfg.accept_mark_value) {
++		info->action = WEBREDIR_ACT_ACCEPT;
++		info->state = (g_webredir_cfg.http_filter_enable ? WEBREDIR_STS_ACCEPT : WEBREDIR_STS_TO_UNHELP);
++		tcp_info->is_url_request = 1;
++	} else if ((ct->mark & g_webredir_cfg.mark_mask_value) == g_webredir_cfg.skip_mark_value) {
++		info->action = WEBREDIR_ACT_SKIP;
++		info->state = WEBREDIR_STS_TO_UNHELP;
++	}
++}
++
++static inline void remove_http_help(struct nf_conn *ct)
++{
++	if (unlikely(!nf_ct_ext_exist(ct, NF_CT_EXT_HELPER)))
++		return;
++
++	ct->ext->offset[NF_CT_EXT_HELPER] = 0;
++}
++
++static int handle_accept_stream_pkt_in(struct nf_conn *ct, struct nf_ct_http_master *ct_http_info)
++{
++	/* unhelp  */
++#if defined(CONFIG_BCM_KF_BLOG) && defined(CONFIG_BLOG)
++	remove_http_help(ct);
++	set_bit(IPS_BLOG_BIT, &ct->status);
++#endif
++	ct_http_info->state = WEBREDIR_STS_UNHELPED;
++
++	return NF_ACCEPT;
++}
++
++/* match keyword, return true; else return false  */
++static bool http_keyword_match(struct webredir_cfg *cfg, struct sk_buff *skb, unsigned int protoff)
++{
++	int ret, i;
++	struct tcphdr *tcph;
++	unsigned int dataoff, datalen;
++
++	ret = skb_linearize(skb);
++	if (unlikely(ret))
++		return false;
++
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return false;
++
++	dataoff = protoff + tcp_hdrlen(skb);
++	datalen = skb->len - dataoff;
++
++	if (datalen <= 0)
++		return false;
++
++	for (i = 0; i < NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS; i++)
++		if (strlen(cfg->filter_keywords[i]) && strnstr(skb->data + dataoff, cfg->filter_keywords[i], datalen)) {
++			spin_lock_bh(&counter_lock);
++			keyword_match_cnt[i]++;
++			spin_unlock_bh(&counter_lock);
++			return true;
++		}
++
++	return false;
++}
++
++static int http_keyword_filter(struct webredir_cfg *cfg, struct sk_buff *skb, unsigned int protoff, struct nf_ct_http_master *ct_http_info)
++{
++	struct nf_ct_http_tcp_info *lst_clnt_tcp_info = NULL;
++	struct tcphdr *tcph = NULL;
++
++	if (likely(!http_keyword_match(&g_webredir_cfg, skb, protoff)))
++		return NF_ACCEPT;
++
++	lst_clnt_tcp_info = get_last_tcp_info_point(ct_http_info, WEBREDIR_IPT_OUT, WEBREDIR_FROM_CLNT);
++	tcph = tcp_hdr(skb);
++	if (unlikely(tcph == NULL))
++		return NF_ACCEPT;
++
++	/* one of the keywords matched */
++	if (lst_clnt_tcp_info->is_url_request && lst_clnt_tcp_info->seq + lst_clnt_tcp_info->tcp_data_len == ntohl(tcph->ack_seq)) {
++	/* if the last packet from client/browser includes URL request, and this packet is the first HTTP packet from server
++	 * so redirect it.  */
++		ct_http_info->action = WEBREDIR_ACT_REDIR;
++		ct_http_info->state = WEBREDIR_STS_TO_REDIR;
++		return NF_ACCEPT;
++	} else {
++	/* else, this HTTP stream can not be redirected, so drop this stream. */
++		ct_http_info->action = WEBREDIR_ACT_DROP;
++		return NF_DROP;
++	}
++}
++
++static int help(struct sk_buff *skb,
++		unsigned int protoff,
++		struct nf_conn *ct,
++		enum ip_conntrack_info ctinfo)
++{
++	int ret = NF_ACCEPT;
++	int dir = CTINFO2DIR(ctinfo);
++	int disorder_state;
++	enum webredir_from from;
++	struct nf_ct_http_master *ct_http_info = &nfct_help(ct)->help.ct_http_info;
++
++	/* Until there's been traffic both ways, don't look in packets. */
++	if (ctinfo != IP_CT_ESTABLISHED &&
++		ctinfo != IP_CT_ESTABLISHED_REPLY) {
++		return NF_ACCEPT;
++	}
++
++	read_lock_bh(&nf_http_lock);
++
++	if (!l3_proto_enabled(ct, &g_webredir_cfg)) {
++		ret = NF_ACCEPT;
++		goto out;
++	}
++
++	if (unlikely(ct_http_info->action == WEBREDIR_ACT_SKIP)) {
++		ret = NF_ACCEPT;
++		goto out;
++	}
++
++	from = (dir == IP_CT_DIR_ORIGINAL ? WEBREDIR_FROM_CLNT : WEBREDIR_FROM_SVR);
++
++	/* keyword filter part
++	 * if action is DROP, then drop all packets of this stream.
++	 * else, to search the keyword in this packet */
++	if (g_webredir_cfg.http_filter_enable) {
++		/* already matched keyword, and not the first responce packet from server, drop it */
++		if (ct_http_info->action == WEBREDIR_ACT_DROP) {
++			ret = NF_DROP;
++			goto out;
++		} else if (from == WEBREDIR_FROM_SVR &&
++			(ct_http_info->action == WEBREDIR_ACT_ACCEPT || ct_http_info->action == WEBREDIR_ACT_NONE)) {
++			ret = http_keyword_filter(&g_webredir_cfg, skb, protoff, ct_http_info);
++			if (unlikely(ret == NF_DROP))
++				goto out;
++		}
++	}
++
++	if (ct_http_info->action == WEBREDIR_ACT_ACCEPT) {
++		ret = NF_ACCEPT;
++		goto out;
++	}
++
++	disorder_state = is_tcp_disorder(ct_http_info, skb, from);
++	if (disorder_state >= 0) {
++		upd_last_pkt_tcp_info(ct_http_info, skb, WEBREDIR_IPT_IN, from);
++	} else if (ct_http_info->action == WEBREDIR_ACT_REDIR && ct_http_info->state != WEBREDIR_STS_FAKE_FIN_WAIT2) {
++		ret = NF_DROP;  /* drop disorder packet, only for stream to be redirected*/
++		goto out;
++	}
++
++	if (ct_http_info->action == WEBREDIR_ACT_NONE)
++		init_redir_info(ct, ct_http_info, from);
++
++	if (ct_http_info->action == WEBREDIR_ACT_REDIR) {
++		if (dir == IP_CT_DIR_ORIGINAL) {
++			ret = handle_redir_stream_clnt_pkt_in(skb, ct, ct_http_info);
++		} else {
++			ret = handle_redir_stream_svr_pkt_in(skb, ct, protoff, ct_http_info, &g_webredir_cfg);
++		}
++	} else if ((ct_http_info->action == WEBREDIR_ACT_ACCEPT || ct_http_info->action == WEBREDIR_ACT_SKIP) &&
++		ct_http_info->state == WEBREDIR_STS_TO_UNHELP) {
++		ret = handle_accept_stream_pkt_in(ct, ct_http_info);
++	}
++
++	if (ret == NF_ACCEPT || (ct_http_info->state == WEBREDIR_STS_FAKE_FIN_WAIT1 && dir == IP_CT_DIR_ORIGINAL) ||
++		ct_http_info->state == WEBREDIR_STS_FAKE_FIN_WAIT2) {
++		upd_last_pkt_tcp_info(ct_http_info, skb, WEBREDIR_IPT_OUT, from);
++	}
++
++out:
++	read_unlock_bh(&nf_http_lock);
++
++	return ret;
++}
++
++static struct nf_conntrack_helper http[MAX_PORTS][2] __read_mostly;
++static char http_names[MAX_PORTS][2][sizeof("http-65535")] __read_mostly;
++
++static void *webredir_seq_start(struct seq_file *seq, loff_t *pos)
++{
++	read_lock_bh(&nf_http_lock);
++	if (*pos != 0)
++		return NULL;
++
++	return pos;
++}
++
++static void *webredir_seq_next(struct seq_file *s, void *v, loff_t *pos)
++{
++	return NULL;
++}
++
++static void webredir_seq_stop(struct seq_file *s, void *v)
++{
++	read_unlock_bh(&nf_http_lock);
++}
++
++static void webredir_seq_show_keywords(struct seq_file *seq, struct webredir_cfg *cfg)
++{
++	int i, j;
++	unsigned int tmp;
++
++	for (i=0; i < NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS && cfg->filter_keywords[i][0]; i++) {
++		spin_lock_bh(&counter_lock);
++		tmp = keyword_match_cnt[i];
++		spin_unlock_bh(&counter_lock);
++
++		seq_printf(seq, "keyword(matched %d times)=", tmp);
++		for (j=0; j < NF_CT_HTTP_MAX_FILTER_KEYWORD_LEN - 1 && cfg->filter_keywords[i][j]; j++)
++			seq_printf(seq, "%02x ", (unsigned char)(cfg->filter_keywords[i][j]));
++
++		seq_puts(seq, "\r\n");
++	}
++}
++
++static int webredir_seq_show(struct seq_file *seq, void *v)
++{
++	/* global section */
++	seq_printf(seq, "%s\r\n", proc_cfg_section_names[PROC_CFG_SEC_GLOBAL]);
++	if (g_webredir_cfg.ipv4_enable)
++		seq_puts(seq, "IPv4=1\r\n");
++	if (g_webredir_cfg.ipv6_enable)
++		seq_puts(seq, "IPv6=1\r\n");
++	if (g_webredir_cfg.http_filter_enable)
++		seq_puts(seq, "keyword_filter_enable=1\r\n");
++	seq_printf(seq, "redir_mark_value=%x\r\n", g_webredir_cfg.redir_mark_value);
++	seq_printf(seq, "accept_mark_value=%x\r\n", g_webredir_cfg.accept_mark_value);
++	seq_printf(seq, "skip_mark_value=%x\r\n", g_webredir_cfg.skip_mark_value);
++	seq_printf(seq, "mark_mask_value=%x\r\n", g_webredir_cfg.mark_mask_value);
++
++	/* http filter section */
++	if (g_webredir_cfg.http_filter_enable) {
++		seq_printf(seq, "%s\r\n", proc_cfg_section_names[PROC_CFG_SEC_HTTP_FILTER]);
++		webredir_seq_show_keywords(seq, &g_webredir_cfg);
++	}
++
++	if (g_webredir_cfg.redir_html) {
++		seq_printf(seq, "%s\r\n", proc_cfg_section_names[PROC_CFG_SEC_WEB_REDIR]);
++		seq_puts(seq, g_webredir_cfg.redir_html);
++	}
++
++	seq_puts(seq, "\r\n");
++
++	return 0;
++}
++
++static const struct seq_operations webredir_seq_ops = {
++	.start = webredir_seq_start,
++	.next = webredir_seq_next,
++	.stop = webredir_seq_stop,
++	.show = webredir_seq_show
++};
++
++static int webredir_open(struct inode *inode, struct file *file)
++{
++	return seq_open_net(inode, file, &webredir_seq_ops,
++			sizeof(struct webredir_cfg));
++}
++
++
++static inline void clean_webredir_cfg(struct webredir_cfg *cfg)
++{
++	if (cfg->redir_html) {
++		kfree(cfg->redir_html);
++		cfg->redir_html = NULL;
++	}
++
++	memset(cfg, 0, sizeof(struct webredir_cfg));
++
++	spin_lock_bh(&counter_lock);
++	memset(keyword_match_cnt, 0, sizeof(keyword_match_cnt));
++	spin_unlock_bh(&counter_lock);
++}
++
++static void split_sections(char *buf, int len, char *sections[])
++{
++	int i, j;
++	char *tmp, *tmp1;
++
++	for (i = 0; i < PROC_CFG_SEC_NUM; i++)
++		sections[i] = strnstr(buf, proc_cfg_section_names[i], len);
++
++	/* find section end */
++	for (i = 0; i < PROC_CFG_SEC_NUM; i++) {
++		tmp = sections[i];
++		if (!tmp)
++			continue;
++
++		tmp1 = buf + len;
++		for (j=0; j < PROC_CFG_SEC_NUM; j++)
++			if (sections[j] && i != j && tmp < sections[j] && sections[j] < tmp1)
++				tmp1 = sections[j];
++
++		tmp1--;
++		*tmp1 = '\0';
++	}
++}
++
++static int get_cfg_hex_value(char *buf, char *cfg_name)
++{
++	char *tmp;
++	int val;
++
++	tmp = buf;
++	while ((tmp = strstr(tmp, cfg_name))) {
++		tmp += strlen(cfg_name);
++		if (*tmp == '=') {
++			tmp++;
++			break;
++		}
++	}
++
++	if (tmp == NULL)
++		return 0;
++
++	if (sscanf(tmp, "%x", &val) > 0)
++		return val;
++	else
++		return 0;
++}
++
++/* global config include:
++ * ipv4
++ * ipv6
++ * keyword_filter_enable
++ * redir_mark_value
++ * accept_mark_value
++ * mark_mask_value */
++static void parse_cfg_global(char *buf, struct webredir_cfg *cfg)
++{
++	cfg->ipv4_enable = (get_cfg_hex_value(buf, "ipv4") == 1 ? true : false);
++	cfg->ipv6_enable = (get_cfg_hex_value(buf, "ipv6") == 1 ? true : false);
++	cfg->http_filter_enable = (get_cfg_hex_value(buf, "keyword_filter_enable") == 1 ? true : false);
++	cfg->redir_mark_value = get_cfg_hex_value(buf, "redir_mark_value");
++	cfg->accept_mark_value = get_cfg_hex_value(buf, "accept_mark_value");
++	cfg->skip_mark_value = get_cfg_hex_value(buf, "skip_mark_value");
++	cfg->mark_mask_value = get_cfg_hex_value(buf, "mark_mask_value");
++}
++
++static void parse_cfg_web_redir(char *buf, char *webdirect, struct webredir_cfg *cfg)
++{
++	int len = strlen(buf);
++	int name_len = strlen(proc_cfg_section_names[PROC_CFG_SEC_WEB_REDIR]);
++	name_len++;  /* include the \r */
++
++	if (len == 0 || len <= name_len)
++		return;
++
++	len -= name_len;
++	buf += name_len;
++	
++	g_webredir_cfg.redir_html = webdirect;
++        memset(g_webredir_cfg.redir_html, 0, len + 1); 
++	memcpy(g_webredir_cfg.redir_html, buf, len + 1);
++}
++
++static char *move_to_hex_num(char *str, bool next)
++{
++	while (1) {
++		if (next && is_hex_num(*str)) {
++			str++;
++			continue;
++		}
++		next = false;
++
++		if (is_hex_num(*str))
++			return str;
++
++		if (*str == '\0' || *str == '\r' || *str == '\n')
++			return NULL;
++
++		str++;
++	}
++}
++
++static void parse_keyword_str(char *cfg_str, char *cfg_buf)
++{
++	char *tmp = cfg_str;
++	int j = 0;
++	unsigned int i;
++	bool next = false;
++
++	while ((tmp = move_to_hex_num(tmp, next))) {
++		if (sscanf(tmp, "%x", &i) > 0) {
++			*(cfg_buf + j) = (i & 0xff);
++			if (++j >= (NF_CT_HTTP_MAX_FILTER_KEYWORD_LEN - 1))
++				break;
++		}
++
++		next = true;
++	}
++}
++
++/* this config section includes up to NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS lines in following format
++ *
++ * keyword=%2x %2x %2x ...
++ */
++static void parse_cfg_http_filter(char *buf, struct webredir_cfg *cfg)
++{
++	char *tmp;
++	int i = 0;
++
++	tmp = buf;
++	while ((tmp = strstr(tmp, "keyword="))) {
++		tmp += strlen("keyword=");
++
++		parse_keyword_str(tmp, cfg->filter_keywords[i]);
++		if (++i >= NF_CT_HTTP_MAX_FILTER_KEYWORD_STRINGS)
++			break;
++	}
++}
++
++static int parse_proc_file(char *buf, int len, char *webdirect)
++{
++	char *sections[PROC_CFG_SEC_NUM];
++        struct webredir_cfg *cfg = &g_webredir_cfg;
++	clean_webredir_cfg(cfg);
++
++	memset(sections, 0, PROC_CFG_SEC_NUM);
++	split_sections(buf, len, sections);
++
++	if (sections[PROC_CFG_SEC_GLOBAL])
++		parse_cfg_global(sections[PROC_CFG_SEC_GLOBAL], cfg);
++
++	if (sections[PROC_CFG_SEC_WEB_REDIR])
++		parse_cfg_web_redir(sections[PROC_CFG_SEC_WEB_REDIR], webdirect, cfg);
++
++	if (cfg->http_filter_enable && sections[PROC_CFG_SEC_HTTP_FILTER])
++		parse_cfg_http_filter(sections[PROC_CFG_SEC_HTTP_FILTER], cfg);
++
++	return 0;
++}
++
++static int alloc_webdirect_buf(char *buf, int size, char **webdirect_ptr)
++{
++	int webdirect_size = 0;
++	char *session = strstr(buf, proc_cfg_section_names[PROC_CFG_SEC_WEB_REDIR]);
++	int name_len = 0;
++	ptrdiff_t diff;
++
++	if (session) {
++		name_len = strlen(proc_cfg_section_names[PROC_CFG_SEC_WEB_REDIR]) + 1;
++		diff = session - buf;
++		webdirect_size = size - (int)diff - name_len;
++		*webdirect_ptr = kmalloc(webdirect_size, GFP_KERNEL);
++		if(*webdirect_ptr)
++			return 0;
++	}
++	return -1;
++}
++
++static ssize_t webredir_proc_file_write(struct file *file, const char __user *buf,
++				 size_t size, loff_t *ppos)
++{
++	char k_buf[WEBREDIR_SEQ_FILE_MAX_SIZE] = "";
++	int ret;
++	char *webdirect = NULL;
++
++	if (size == 0 || buf == NULL)
++		return 0;
++
++	if (*ppos != 0)
++		return -ESPIPE;
++
++	if (size >= WEBREDIR_SEQ_FILE_MAX_SIZE) {
++		pr_err(WEBREDIR_ERR_HEAD "Should be less than %d\r\n", WEBREDIR_SEQ_FILE_MAX_SIZE);
++		return -EINVAL;
++	}
++
++	if (copy_from_user(k_buf, buf, size))
++		return -EFAULT;
++
++        if (0 != alloc_webdirect_buf(k_buf, size, &webdirect)) {
++		pr_err(WEBREDIR_ERR_HEAD "Section [webredirect] doesn't exist\r\n");
++                return -EINVAL;
++        }
++
++        write_lock(&nf_http_lock);
++
++	ret = parse_proc_file(k_buf, size, webdirect);
++
++        write_unlock(&nf_http_lock);
++
++	if (!ret)
++		return size;
++	else
++		return ret;
++}
++
++
++static const struct file_operations webredir_proc_file_ops = {
++	.owner   = THIS_MODULE,
++	.open    = webredir_open,
++	.read    = seq_read,
++	.write   = webredir_proc_file_write,
++	.llseek  = seq_lseek,
++	.release = seq_release_net,
++};
++
++static int webredir_proc_init(void)
++{
++	struct proc_dir_entry *proc;
++
++	if (!init_net.proc_net)
++		return -EFAULT;
++
++	proc = proc_create("nf_conntrack_webredir", 0660, init_net.proc_net, &webredir_proc_file_ops);
++	if (!proc)
++		return -ENOMEM;
++
++	return 0;
++}
++
++static void webredir_proc_remove(void)
++{
++	remove_proc_entry("nf_conntrack_webredir", init_net.proc_net);
++}
++
++static const struct nf_conntrack_expect_policy http_exp_policy = {
++	.max_expected   = 0,
++	.timeout	= 5 * 60,
++};
++
++
++static void nf_conntrack_http_helper_fini(void)
++{
++	int i, j;
++
++	for (i = 0; i < ports_c; i++) {
++		for (j = 0; j < 2; j++) {
++			if (http[i][j].me == NULL)
++				continue;
++
++			pr_debug("nf_ct_http: unregistering helper for pf: %d "
++				 "port: %d\n",
++				 http[i][j].tuple.src.l3num, ports[i]);
++			nf_conntrack_helper_unregister(&http[i][j]);
++		}
++	}
++
++	write_lock(&nf_http_lock);
++	clean_webredir_cfg(&g_webredir_cfg);
++	write_unlock(&nf_http_lock);
++}
++
++static __exit void nf_conntrack_http_fini(void)
++{
++	nf_conntrack_http_helper_fini();
++
++	webredir_proc_remove();
++}
++
++
++static int __init nf_conntrack_http_init(void)
++{
++	int i, j;
++	char *tmpname;
++
++	memset(&g_webredir_cfg, 0, sizeof(struct webredir_cfg));
++	rwlock_init(&nf_http_lock);
++
++	if (ports_c == 0)
++		ports[ports_c++] = HTTP_PORT;
++
++	for (i = 0; i < ports_c; i++) {
++		int ret;
++
++		http[i][0].tuple.src.l3num = PF_INET;
++		http[i][1].tuple.src.l3num = PF_INET6;
++		for (j = 0; j < 2; j++) {
++			http[i][j].tuple.src.u.tcp.port = htons(ports[i]);
++			http[i][j].tuple.dst.protonum = IPPROTO_TCP;
++			http[i][j].expect_policy = &http_exp_policy;  /* no exception at all */
++			http[i][j].me = THIS_MODULE;
++			http[i][j].help = help;
++			tmpname = &http_names[i][j][0];
++			if (ports[i] == HTTP_PORT)
++				sprintf(tmpname, "http");
++			else
++				sprintf(tmpname, "http-%d", ports[i]);
++			http[i][j].name = tmpname;
++
++			pr_debug("nf_ct_http: registering helper for pf: %d "
++				 "port: %d\n",
++				 http[i][j].tuple.src.l3num, ports[i]);
++			ret = nf_conntrack_helper_register(&http[i][j]);
++			if (ret) {
++				printk(KERN_ERR "nf_ct_http: failed to register"
++					 " helper for pf: %d port: %d\n",
++					http[i][j].tuple.src.l3num, ports[i]);
++				nf_conntrack_http_helper_fini();
++				return ret;
++			}
++		}
++	}
++
++	return webredir_proc_init();
++}
++
++module_init(nf_conntrack_http_init);
++module_exit(nf_conntrack_http_fini);
++

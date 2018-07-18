@@ -1,0 +1,50 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -61,6 +61,10 @@
+ 
+ #include <linux/ctype.h>
+ 
++#if (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
++#include <linux/iqos.h>
++#endif
++
+ #define MAX_PORTS 8
+ static int ports[MAX_PORTS];
+ static int num_ports = 0;
+@@ -344,6 +348,14 @@ help_out(struct sk_buff *skb, unsigned c
+ 		if (strncmp(pdata+cmdoff, "SETUP ", 6) != 0)
+ 			continue;   /* not a SETUP message */
+ 
++#if defined(CONFIG_BCM_KF_NETFILTER) && (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
++		/* register the RTSP client port mapping with ingress QoS classifier */
++		if ((ct->status & IPS_REPL_DSTPORT_IQOS_DYNPRIO) == 0) {
++			iqos_add_L4port(IPPROTO_TCP, ntohs(ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u.tcp.port), IQOS_ENT_DYN, IQOS_PRIO_HIGH);
++			ct->status |= IPS_REPL_DSTPORT_IQOS_DYNPRIO;
++		}
++#endif
++
+ 		srvaddr = ct->tuplehash[!dir].tuple.src.u3;
+ 
+ 		/* try to get RTP media source from SETUP URI */
+@@ -394,6 +406,10 @@ help_out(struct sk_buff *skb, unsigned c
+ 				  IPPROTO_UDP, NULL, &be_loport);
+ 
+ 		rtp_exp->flags = 0;
++#if defined(CONFIG_BCM_KF_NETFILTER) && (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
++		/* register the RTP port with ingress QoS classifier */
++		rtp_exp->flags |= NF_CT_EXPECT_DSTPORT_IQOS_DYNPRIO;
++#endif
+ 
+ 		if (expinfo.pbtype == pb_range) {
+ 			pr_debug("setup expectation for rtcp\n");
+@@ -412,6 +428,10 @@ help_out(struct sk_buff *skb, unsigned c
+ 					  IPPROTO_UDP, NULL, &be_hiport);
+ 
+ 			rtcp_exp->flags = 0;
++#if defined(CONFIG_BCM_KF_NETFILTER) && (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
++			/* register the RTCP port with ingress QoS classifier */
++			rtcp_exp->flags |= NF_CT_EXPECT_DSTPORT_IQOS_DYNPRIO;
++#endif
+ 
+ 			pr_debug("expect_related %pI4:%u-%u-%pI4:%u-%u\n",
+ 				   &rtp_exp->tuple.src.u3.ip,

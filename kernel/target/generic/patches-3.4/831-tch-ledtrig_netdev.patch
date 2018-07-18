@@ -1,0 +1,32 @@
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -475,4 +475,11 @@ config LEDS_TRIGGER_MORSE
+ comment "iptables trigger is under Netfilter config (LED target)"
+ 	depends on LEDS_TRIGGERS
+ 
++config LEDS_TRIGGER_NETDEV
++	tristate "LED Netdev Trigger"
++	depends on NET && LEDS_TRIGGERS
++	help
++	  This allows LEDs to be controlled by network device activity.
++	  If unsure, say Y.
++
+ endif # NEW_LEDS
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -57,3 +57,4 @@ obj-$(CONFIG_LEDS_TRIGGER_BACKLIGHT)	+=
+ obj-$(CONFIG_LEDS_TRIGGER_BACKLIGHT)	+= ledtrig-backlight.o
+ obj-$(CONFIG_LEDS_TRIGGER_GPIO)		+= ledtrig-gpio.o
+ obj-$(CONFIG_LEDS_TRIGGER_DEFAULT_ON)	+= ledtrig-default-on.o
++obj-$(CONFIG_LEDS_TRIGGER_NETDEV)	+= ledtrig-netdev.o
+--- a/drivers/leds/ledtrig-netdev.c
++++ b/drivers/leds/ledtrig-netdev.c
+@@ -261,7 +261,7 @@ static int netdev_trig_notify(struct not
+ 			      unsigned long evt,
+ 			      void *dv)
+ {
+-	struct net_device *dev = netdev_notifier_info_to_dev((struct netdev_notifier_info *) dv);
++	struct net_device *dev = dv;
+ 	struct led_netdev_data *trigger_data = container_of(nb, struct led_netdev_data, notifier);
+ 
+ 	if (evt != NETDEV_UP && evt != NETDEV_DOWN && evt != NETDEV_CHANGE && evt != NETDEV_REGISTER && evt != NETDEV_UNREGISTER && evt != NETDEV_CHANGENAME)

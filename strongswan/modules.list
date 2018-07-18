@@ -1,0 +1,11 @@
+[
+    "strongswan",
+    "strongswan-charon",
+    "strongswan-mod-kernel-netlink",
+    "strongswan-mod-nonce",
+    "strongswan-mod-openssl",
+    "strongswan-mod-socket-default",
+    "strongswan-mod-stroke",
+    "strongswan-mod-updown",
+    "strongswan-utils"
+]

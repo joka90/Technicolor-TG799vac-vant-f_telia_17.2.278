@@ -1,0 +1,21 @@
+From 6eeecdb4d822fc0a680692b7fbccacaa05e7235f Mon Sep 17 00:00:00 2001
+From: Alin Nastac <alin.nastac@technicolor.com>
+Date: Tue, 9 Feb 2016 14:09:29 +0100
+Subject: [PATCH] Load /var/state uci overlay
+
+---
+ main.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+--- a/main.c
++++ b/main.c
+@@ -56,6 +56,9 @@ build_state(bool runtime)
+ 	if (!state->uci)
+ 		error("Out of memory");
+ 
++	/* Set /var/state overlay */
++	uci_set_savedir(state->uci, "/var/state");
++
+ 	if (runtime)
+ 	{
+ 		sf = fopen(FW3_STATEFILE, "r");

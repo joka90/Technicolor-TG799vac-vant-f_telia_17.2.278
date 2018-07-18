@@ -1,0 +1,77 @@
+--- a/extensions/libipt_MASQUERADE.c
++++ b/extensions/libipt_MASQUERADE.c
+@@ -11,6 +11,7 @@
+ enum {
+ 	O_TO_PORTS = 0,
+ 	O_RANDOM,
++	O_MODE,  //brcm
+ };
+ 
+ static void MASQUERADE_help(void)
+@@ -20,12 +21,15 @@ static void MASQUERADE_help(void)
+ " --to-ports <port>[-<port>]\n"
+ "				Port (range) to map to.\n"
+ " --random\n"
+-"				Randomize source port.\n");
++"				Randomize source port.\n"
++" --mode <fullcone|symmetric>\n"
++"				NAT mode.\n"); //brcm
+ }
+ 
+ static const struct xt_option_entry MASQUERADE_opts[] = {
+ 	{.name = "to-ports", .id = O_TO_PORTS, .type = XTTYPE_STRING},
+ 	{.name = "random", .id = O_RANDOM, .type = XTTYPE_NONE},
++	{.name = "mode", .id = O_MODE, .type = XTTYPE_STRING},   //brcm
+ 	XTOPT_TABLEEND,
+ };
+ 
+@@ -86,6 +90,9 @@ static void MASQUERADE_parse(struct xt_o
+ 	else
+ 		portok = 0;
+ 
++	/* Borrow this field as mode value. The default is symmetric */
++	mr->range[0].min_ip = 0;   //brcm
++	
+ 	xtables_option_parse(cb);
+ 	switch (cb->entry->id) {
+ 	case O_TO_PORTS:
+@@ -97,6 +104,17 @@ static void MASQUERADE_parse(struct xt_o
+ 	case O_RANDOM:
+ 		mr->range[0].flags |=  NF_NAT_RANGE_PROTO_RANDOM;
+ 		break;
++//brcm start      
++	case O_MODE:
++		if (strcasecmp(cb->arg, "fullcone") == 0)
++			mr->range[0].min_ip = 1;
++		else if (strcasecmp(cb->arg, "symmetric") == 0)
++			mr->range[0].min_ip = 0;
++		else
++			xtables_error(PARAMETER_PROBLEM,
++				   "Unknown mode %s", cb->arg);
++      break;
++//brcm end      
+ 	}
+ }
+ 
+@@ -116,6 +134,10 @@ MASQUERADE_print(const void *ip, const s
+ 
+ 	if (r->flags & NF_NAT_RANGE_PROTO_RANDOM)
+ 		printf(" random");
++//brcm start
++	if (r->min_ip == 1)
++		printf(" mode: fullcone");
++//brcm end      
+ }
+ 
+ static void
+@@ -132,6 +154,10 @@ MASQUERADE_save(const void *ip, const st
+ 
+ 	if (r->flags & NF_NAT_RANGE_PROTO_RANDOM)
+ 		printf(" --random");
++//brcm start
++	if (r->min_ip == 1)
++		printf("--mode fullcone ");
++//brcm end      
+ }
+ 
+ static struct xtables_target masquerade_tg_reg = {

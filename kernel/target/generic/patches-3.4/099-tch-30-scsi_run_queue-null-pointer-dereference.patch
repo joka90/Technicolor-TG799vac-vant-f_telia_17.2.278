@@ -1,0 +1,51 @@
+See http://lkml.iu.edu/hypermail/linux/kernel/1208.0/02959.html for more info
+
+--- a/drivers/scsi/scsi_sysfs.c
++++ b/drivers/scsi/scsi_sysfs.c
+@@ -347,7 +347,6 @@ static void scsi_device_dev_release_user
+ 	starget->reap_ref++;
+ 	list_del(&sdev->siblings);
+ 	list_del(&sdev->same_target_siblings);
+-	list_del(&sdev->starved_entry);
+ 	spin_unlock_irqrestore(sdev->host->host_lock, flags);
+ 
+ 	cancel_work_sync(&sdev->event_work);
+@@ -955,6 +954,8 @@ int scsi_sysfs_add_sdev(struct scsi_devi
+ void __scsi_remove_device(struct scsi_device *sdev)
+ {
+ 	struct device *dev = &sdev->sdev_gendev;
++	struct Scsi_Host *shost = sdev->host;
++	unsigned long flags;
+ 
+ 	if (sdev->is_visible) {
+ 		if (scsi_device_set_state(sdev, SDEV_CANCEL) != 0)
+@@ -967,6 +968,11 @@ void __scsi_remove_device(struct scsi_de
+ 	} else
+ 		put_device(&sdev->sdev_dev);
+ 	scsi_device_set_state(sdev, SDEV_DEL);
++
++	spin_lock_irqsave(shost->host_lock, flags);
++	list_del(&sdev->starved_entry);
++	spin_unlock_irqrestore(shost->host_lock, flags);
++
+ 	if (sdev->host->hostt->slave_destroy)
+ 		sdev->host->hostt->slave_destroy(sdev);
+ 	transport_destroy_device(dev);
+--- a/drivers/scsi/scsi_lib.c
++++ b/drivers/scsi/scsi_lib.c
+@@ -436,10 +436,15 @@ static void scsi_run_queue(struct reques
+ 			continue;
+ 		}
+ 
++		get_device(&sdev->sdev_gendev); 
+ 		spin_unlock(shost->host_lock);
++
+ 		spin_lock(sdev->request_queue->queue_lock);
+ 		__blk_run_queue(sdev->request_queue);
+ 		spin_unlock(sdev->request_queue->queue_lock);
++
++		put_device(&sdev->sdev_gendev); 
++
+ 		spin_lock(shost->host_lock);
+ 	}
+ 	/* put any unprocessed entries back */

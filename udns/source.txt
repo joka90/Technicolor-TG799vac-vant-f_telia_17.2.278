@@ -1,0 +1,4 @@
+Source: udns-0.4.tar.gz
+Source-Url: http://www.corpit.ru/mjt/udns/
+Source-Version: 
+Source-Proto: 

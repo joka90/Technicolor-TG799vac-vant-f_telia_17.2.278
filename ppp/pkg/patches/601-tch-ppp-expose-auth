@@ -1,0 +1,42 @@
+--- a/pppd/auth.c
++++ b/pppd/auth.c
+@@ -1001,6 +1001,8 @@ auth_withpeer_fail(unit, protocol)
+      */
+     status = EXIT_AUTH_TOPEER_FAILED;
+     lcp_close(unit, "Failed to authenticate ourselves to peer");
++
++    script_unsetenv("AUTHPROTO");
+ }
+ 
+ /*
+@@ -1023,9 +1025,11 @@ auth_withpeer_success(unit, protocol, pr
+ 	    break;
+ #ifdef CHAPMS
+ 	case CHAP_MICROSOFT:
++	    prot = "MS_CHAP";
+ 	    bit |= CHAP_MS_WITHPEER;
+ 	    break;
+ 	case CHAP_MICROSOFT_V2:
++	    prot = "MS_CHAP";
+ 	    bit |= CHAP_MS2_WITHPEER;
+ 	    break;
+ #endif
+@@ -1048,6 +1052,8 @@ auth_withpeer_success(unit, protocol, pr
+ 
+     notice("%s authentication succeeded", prot);
+ 
++    script_setenv("AUTHPROTO", prot, 0);
++	
+     /* Save the authentication method for later. */
+     auth_done[unit] |= bit;
+ 
+--- a/pppd/main.c
++++ b/pppd/main.c
+@@ -542,6 +542,7 @@ main(argc, argv)
+ 	script_unsetenv("CONNECT_TIME");
+ 	script_unsetenv("BYTES_SENT");
+ 	script_unsetenv("BYTES_RCVD");
++	script_unsetenv("AUTHPROTO");
+ 
+ 	lcp_open(0);		/* Start protocol */
+ 	start_link(0);

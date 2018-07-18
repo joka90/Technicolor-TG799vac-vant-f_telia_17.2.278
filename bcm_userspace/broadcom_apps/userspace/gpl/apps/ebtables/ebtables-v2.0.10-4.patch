@@ -1,0 +1,546 @@
+diff -ur orig_ebtables-v2.0.10-4/communication.c ebtables-v2.0.10-4/communication.c
+--- orig_ebtables-v2.0.10-4/communication.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/communication.c	2013-08-06 14:07:08.028111815 -0400
+@@ -282,7 +282,7 @@
+ 	}
+ close_file:
+ 	fclose(file);
+-	return 0;
++	return ret;
+ }
+ 
+ /* Gets executed after ebt_deliver_table. Delivers the counters to the kernel
+diff -ur orig_ebtables-v2.0.10-4/ebtables.c ebtables-v2.0.10-4/ebtables.c
+--- orig_ebtables-v2.0.10-4/ebtables.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/ebtables.c	2013-08-06 14:07:08.032111269 -0400
+@@ -29,6 +29,9 @@
+ #include <signal.h>
+ #include "include/ebtables_u.h"
+ #include "include/ethernetdb.h"
++#include <unistd.h>
++#include <fcntl.h>
++
+ 
+ /* Checks whether a command has already been specified */
+ #define OPT_COMMANDS (replace->flags & OPT_COMMAND || replace->flags & OPT_ZERO)
+@@ -114,6 +117,60 @@
+ static struct ebt_u_entry *new_entry;
+ 
+ 
++#define MUTEX_FILE "/tmp/ebtables.lock"
++
++static struct multiprocess_lock_t {
++    int                 fd;
++    struct flock        lock_struct;
++} multiprocess_lock = {};
++
++/* These two are for inter-process locking */
++void get_global_mutex() {
++    int ret;
++
++    if (multiprocess_lock.fd != 0)
++    {
++        fprintf(stderr, "ebtables: tried to get lock twice.  ignoring second attempt...\n");
++        return;  // ok, this is bad, but not aborting -- attempting to make the best of it...
++    }
++
++    multiprocess_lock.fd = open(MUTEX_FILE, O_NONBLOCK | O_CREAT | O_WRONLY);
++    if (multiprocess_lock.fd == -1) {
++        fprintf(stderr, "could not open file %s\n", MUTEX_FILE);
++        exit(1);
++    }
++
++
++    memset(&multiprocess_lock.lock_struct, 0, sizeof(multiprocess_lock.lock_struct));
++    
++    multiprocess_lock.lock_struct.l_type = F_WRLCK;
++    multiprocess_lock.lock_struct.l_whence = SEEK_SET;
++    multiprocess_lock.lock_struct.l_start = 0;
++    multiprocess_lock.lock_struct.l_len = 0;
++    multiprocess_lock.lock_struct.l_pid = getpid();
++    
++    ret = fcntl(multiprocess_lock.fd, F_SETLKW, &multiprocess_lock.lock_struct);
++    if (ret == -1) {
++       fprintf(stderr, "could not lock file\n");
++       exit(1);
++    }
++    
++    return;
++     
++}
++
++void release_global_mutex() {
++    if(multiprocess_lock.fd != 0) {
++        multiprocess_lock.lock_struct.l_type = F_UNLCK;
++        fcntl(multiprocess_lock.fd, F_SETLK, &multiprocess_lock.lock_struct);
++
++        close(multiprocess_lock.fd);  
++
++        memset(&multiprocess_lock, 0, sizeof(multiprocess_lock));    
++    }
++}
++
++
+ static int global_option_offset;
+ #define OPTION_OFFSET 256
+ static struct option *merge_options(struct option *oldopts,
+diff -ur orig_ebtables-v2.0.10-4/ebtablesd.c ebtables-v2.0.10-4/ebtablesd.c
+--- orig_ebtables-v2.0.10-4/ebtablesd.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/ebtablesd.c	2013-08-06 14:07:08.030111540 -0400
+@@ -47,6 +47,9 @@
+ 	strcpy(replace[2].name, "broute");
+ }
+ 
++extern void get_global_mutex();
++extern void release_global_mutex();
++
+ int main(int argc_, char *argv_[])
+ {
+ 	char *argv[EBTD_ARGC_MAX], *args[4], name[] = "mkdir",
+@@ -54,6 +57,8 @@
+ 	     cmdline[EBTD_CMDLINE_MAXLN];
+ 	int readfd, base = 0, offset = 0, n = 0, ret = 0, quotemode = 0;
+ 
++	get_global_mutex();
++
+ 	/* Make sure the pipe directory exists */
+ 	args[0] = name;
+ 	args[1] = mkdir_option;
+@@ -369,6 +374,7 @@
+ 	}
+ do_exit:
+ 	unlink(EBTD_PIPE);
+-	
++	release_global_mutex();
++    
+ 	return 0;
+ }
+diff -ur orig_ebtables-v2.0.10-4/ebtables-restore.c ebtables-v2.0.10-4/ebtables-restore.c
+--- orig_ebtables-v2.0.10-4/ebtables-restore.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/ebtables-restore.c	2013-08-06 14:07:08.028111815 -0400
+@@ -36,6 +36,9 @@
+ 	strcpy(replace[2].name, "broute");
+ }
+ 
++extern void get_global_mutex();
++extern void release_global_mutex();
++
+ #define ebtrest_print_error(format, args...) do {fprintf(stderr, "ebtables-restore: "\
+                                              "line %d: "format".\n", line, ##args); exit(-1);} while (0)
+ int main(int argc_, char *argv_[])
+@@ -44,6 +47,8 @@
+ 	int i, offset, quotemode = 0, argc, table_nr = -1, line = 0, whitespace;
+ 	char ebtables_str[] = "ebtables";
+ 
++	get_global_mutex();
++
+ 	if (argc_ != 1)
+ 		ebtrest_print_error("options are not supported");
+ 	ebt_silent = 0;
+@@ -131,5 +136,8 @@
+ 		ebt_deliver_table(&replace[table_nr]);
+ 		ebt_deliver_counters(&replace[table_nr]);
+ 	}
++    
++	release_global_mutex();
++    
+ 	return 0;
+ }
+diff -ur orig_ebtables-v2.0.10-4/ebtables-standalone.c ebtables-v2.0.10-4/ebtables-standalone.c
+--- orig_ebtables-v2.0.10-4/ebtables-standalone.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/ebtables-standalone.c	2013-08-06 14:07:08.030111540 -0400
+@@ -4,11 +4,17 @@
+ static struct ebt_u_replace replace;
+ void ebt_early_init_once();
+ 
++extern void get_global_mutex();
++extern void release_global_mutex();
++
++
+ int main(int argc, char *argv[])
+ {
++	get_global_mutex();
+ 	ebt_silent = 0;
+ 	ebt_early_init_once();
+ 	strcpy(replace.name, "filter");
+ 	do_command(argc, argv, EXEC_STYLE_PRG, &replace);
++	release_global_mutex();
+ 	return 0;
+ }
+Only in orig_ebtables-v2.0.10-4: ebtables-v2.0.10-4
+diff -ur orig_ebtables-v2.0.10-4/examples/ulog/test_ulog.c ebtables-v2.0.10-4/examples/ulog/test_ulog.c
+--- orig_ebtables-v2.0.10-4/examples/ulog/test_ulog.c	2011-12-15 15:00:34.000000000 -0500
++++ ebtables-v2.0.10-4/examples/ulog/test_ulog.c	2013-08-06 14:07:08.030111540 -0400
+@@ -130,6 +130,10 @@
+ 	return msg;
+ }
+ 
++
++extern void get_global_mutex();
++extern void release_global_mutex();
++
+ int main(int argc, char **argv)
+ {
+ 	int i, curr_len, pktcnt = 0;
+@@ -142,6 +146,7 @@
+ 	struct icmphdr *icmph;
+ 	struct tm* ptm;
+ 	char time_str[40], *ctmp;
++	get_global_mutex();
+ 
+ 	if (argc == 2) {
+ 		i = strtoul(argv[1], &ctmp, 10);
+@@ -157,12 +162,14 @@
+ 	sfd = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
+ 	if (!sfd) {
+ 		perror("socket");
++		release_global_mutex();
+ 		exit(-1);
+ 	}
+ 
+ 	if (bind(sfd, (struct sockaddr *)(&sa_local), sizeof(sa_local)) ==
+ 	    -1) {
+ 		perror("bind");
++		release_global_mutex();
+ 		exit(-1);
+ 	}
+ 	i = setsockopt(sfd, SOL_SOCKET, SO_RCVBUF, &rcvbufsize,
+@@ -287,6 +294,7 @@
+ 		       "######END#OF##PACKET#DUMP######\n"
+ 		       "###############################\n");
+ 	}
++	release_global_mutex();
+ 
+ 	return 0;
+ }
+diff -ur orig_ebtables-v2.0.10-4/extensions/ebt_ip.c ebtables-v2.0.10-4/extensions/ebt_ip.c
+--- orig_ebtables-v2.0.10-4/extensions/ebt_ip.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/extensions/ebt_ip.c	2013-08-06 14:07:08.032111269 -0400
+@@ -16,7 +16,7 @@
+ #include <getopt.h>
+ #include <netdb.h>
+ #include "../include/ebtables_u.h"
+-#include <linux/netfilter_bridge/ebt_ip.h>
++#include "../include/linux/netfilter_bridge/ebt_ip.h"
+ 
+ #define IP_SOURCE '1'
+ #define IP_DEST   '2'
+@@ -24,6 +24,7 @@
+ #define IP_PROTO  '4'
+ #define IP_SPORT  '5'
+ #define IP_DPORT  '6'
++#define IP_myDSCP '7' /* brcm */
+ 
+ static struct option opts[] =
+ {
+@@ -38,6 +39,7 @@
+ 	{ "ip-sport"            , required_argument, 0, IP_SPORT  },
+ 	{ "ip-destination-port" , required_argument, 0, IP_DPORT  },
+ 	{ "ip-dport"            , required_argument, 0, IP_DPORT  },
++	{ "ip-dscp"             , required_argument, 0, IP_myDSCP }, /* brcm */
+ 	{ 0 }
+ };
+ 
+@@ -103,6 +105,7 @@
+ "--ip-src    [!] address[/mask]: ip source specification\n"
+ "--ip-dst    [!] address[/mask]: ip destination specification\n"
+ "--ip-tos    [!] tos           : ip tos specification\n"
++"--ip-dscp   [!] dscp          : ip dscp specification\n"
+ "--ip-proto  [!] protocol      : ip protocol specification\n"
+ "--ip-sport  [!] port[:port]   : tcp/udp source port or port range\n"
+ "--ip-dport  [!] port[:port]   : tcp/udp destination port or port range\n");
+@@ -122,6 +125,8 @@
+ #define OPT_PROTO  0x08
+ #define OPT_SPORT  0x10
+ #define OPT_DPORT  0x20
++#define OPT_DSCP   0x40 /* brcm */
++
+ static int parse(int c, char **argv, int argc, const struct ebt_u_entry *entry,
+    unsigned int *flags, struct ebt_entry_match **match)
+ {
+@@ -181,6 +186,17 @@
+ 		ipinfo->bitmask |= EBT_IP_TOS;
+ 		break;
+ 
++	case IP_myDSCP:   /* brcm */
++		ebt_check_option2(flags, OPT_DSCP);
++		if (ebt_check_inverse2(optarg))
++			ipinfo->invflags |= EBT_IP_DSCP;
++		i = strtol(optarg, &end, 16);
++		if (i < 0 || i > 255 || (i & 0x3) || *end != '\0')
++			ebt_print_error("Problem with specified IP dscp");
++		ipinfo->dscp = i;
++		ipinfo->bitmask |= EBT_IP_DSCP;
++		break;
++
+ 	case IP_PROTO:
+ 		ebt_check_option2(flags, OPT_PROTO);
+ 		if (ebt_check_inverse2(optarg))
+@@ -280,6 +296,13 @@
+ 			printf("! ");
+ 		print_port_range(ipinfo->dport);
+ 	}
++   /* brcm */
++	if (ipinfo->bitmask & EBT_IP_DSCP) {
++		printf("--ip-dscp ");
++		if (ipinfo->invflags & EBT_IP_DSCP)
++			printf("! ");
++		printf("0x%02X ", ipinfo->dscp);
++	}
+ }
+ 
+ static int compare(const struct ebt_entry_match *m1,
+@@ -322,6 +345,11 @@
+ 		   ipinfo1->dport[1] != ipinfo2->dport[1])
+ 			return 0;
+ 	}
++   /* brcm */
++	if (ipinfo1->bitmask & EBT_IP_DSCP) {
++		if (ipinfo1->dscp != ipinfo2->dscp)
++			return 0;
++	}
+ 	return 1;
+ }
+ 
+diff -ur orig_ebtables-v2.0.10-4/extensions/ebt_mark.c ebtables-v2.0.10-4/extensions/ebt_mark.c
+--- orig_ebtables-v2.0.10-4/extensions/ebt_mark.c	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/extensions/ebt_mark.c	2013-08-06 14:07:08.030111540 -0400
+@@ -11,7 +11,7 @@
+ #include <string.h>
+ #include <getopt.h>
+ #include "../include/ebtables_u.h"
+-#include <linux/netfilter_bridge/ebt_mark_t.h>
++#include "../include/linux/netfilter_bridge/ebt_mark_t.h"
+ 
+ static int mark_supplied;
+ 
+@@ -20,6 +20,8 @@
+ #define MARK_ORMARK  '3'
+ #define MARK_ANDMARK '4'
+ #define MARK_XORMARK '5'
++#define MARK_SETVTAG '6'
++
+ static struct option opts[] =
+ {
+ 	{ "mark-target" , required_argument, 0, MARK_TARGET },
+@@ -30,6 +32,7 @@
+ 	{ "mark-or"     , required_argument, 0, MARK_ORMARK  },
+ 	{ "mark-and"    , required_argument, 0, MARK_ANDMARK },
+ 	{ "mark-xor"    , required_argument, 0, MARK_XORMARK },
++	{ "vtag-set"    , required_argument, 0, MARK_SETVTAG },
+ 	{ 0 }
+ };
+ 
+@@ -41,6 +44,7 @@
+ 	" --mark-or  value     : Or nfmark with value (nfmark |= value)\n"
+ 	" --mark-and value     : And nfmark with value (nfmark &= value)\n"
+ 	" --mark-xor value     : Xor nfmark with value (nfmark ^= value)\n"
++	" --vtag-set value     : Set vlan tag value\n"
+ 	" --mark-target target : ACCEPT, DROP, RETURN or CONTINUE\n");
+ }
+ 
+@@ -59,6 +63,7 @@
+ #define OPT_MARK_ORMARK   0x04
+ #define OPT_MARK_ANDMARK  0x08
+ #define OPT_MARK_XORMARK  0x10
++#define OPT_MARK_SETVTAG  0x20
+ static int parse(int c, char **argv, int argc,
+    const struct ebt_u_entry *entry, unsigned int *flags,
+    struct ebt_entry_target **target)
+@@ -100,6 +105,10 @@
+ 			ebt_print_error2("--mark-xor cannot be used together with specific --mark option");
+ 		markinfo->target = (markinfo->target & EBT_VERDICT_BITS) | MARK_XOR_VALUE;
+                 break;
++	case MARK_SETVTAG:
++		ebt_check_option2(flags, OPT_MARK_SETVTAG);
++		markinfo->target = (markinfo->target & EBT_VERDICT_BITS) | VTAG_SET_VALUE;
++		break;
+ 	 default:
+ 		return 0;
+ 	}
+@@ -140,6 +149,8 @@
+ 		printf("--mark-xor");
+ 	else if (tmp == MARK_AND_VALUE)
+ 		printf("--mark-and");
++	else if (tmp == VTAG_SET_VALUE)
++		printf("--vtag-set");
+ 	else
+ 		ebt_print_error("oops, unknown mark action, try a later version of ebtables");
+ 	printf(" 0x%lx", markinfo->mark);
+diff -ur orig_ebtables-v2.0.10-4/extensions/Makefile ebtables-v2.0.10-4/extensions/Makefile
+--- orig_ebtables-v2.0.10-4/extensions/Makefile	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/extensions/Makefile	2013-08-06 14:07:08.030111540 -0400
+@@ -1,7 +1,13 @@
+ #! /usr/bin/make
+ 
+-EXT_FUNC+=802_3 nat arp arpreply ip ip6 standard log redirect vlan mark_m mark \
+-          pkttype stp among limit ulog nflog
++#BRCM begin
++#EXT_FUNC+=802_3 nat arp arpreply ip ip6 standard log redirect vlan mark_m mark \
++#          pkttype stp among limit ulog nflog
++EXT_FUNC+=ip ip6 standard vlan mark_m mark time ftos skiplog
++ifeq ($(strip $(WIRELESS)),1)
++EXT_FUNC+=wmm_mark
++endif
++#BRCM end
+ EXT_TABLES+=filter nat broute
+ EXT_OBJS+=$(foreach T,$(EXT_FUNC), extensions/ebt_$(T).o)
+ EXT_OBJS+=$(foreach T,$(EXT_TABLES), extensions/ebtable_$(T).o)
+@@ -11,13 +17,13 @@
+ EXT_LIBSI+=$(foreach T,$(EXT_TABLES), -lebtable_$(T))
+ 
+ extensions/ebt_%.so: extensions/ebt_%.o
+-	$(CC) $(LDFLAGS) -shared -o $@ -lc $< -nostartfiles
++	$(CC) $(LDFLAGS) -shared -o $@ $< -nostartfiles
+ 
+ extensions/libebt_%.so: extensions/ebt_%.so
+ 	mv $< $@
+ 
+ extensions/ebtable_%.so: extensions/ebtable_%.o
+-	$(CC) $(LDFLAGS) -shared -o $@ -lc $< -nostartfiles
++	$(CC) $(LDFLAGS) -shared -o $@ $< -nostartfiles
+ 
+ extensions/libebtable_%.so: extensions/ebtable_%.so
+ 	mv $< $@
+diff -ur orig_ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_ip.h ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_ip.h
+--- orig_ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_ip.h	2011-12-15 15:02:48.000000000 -0500
++++ ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_ip.h	2013-08-06 14:07:08.030111540 -0400
+@@ -23,8 +23,9 @@
+ #define EBT_IP_PROTO 0x08
+ #define EBT_IP_SPORT 0x10
+ #define EBT_IP_DPORT 0x20
++#define EBT_IP_DSCP  0x40  /* brcm */
+ #define EBT_IP_MASK (EBT_IP_SOURCE | EBT_IP_DEST | EBT_IP_TOS | EBT_IP_PROTO |\
+- EBT_IP_SPORT | EBT_IP_DPORT )
++ EBT_IP_SPORT | EBT_IP_DPORT | EBT_IP_DSCP )
+ #define EBT_IP_MATCH "ip"
+ 
+ /* the same values are used for the invflags */
+@@ -34,6 +35,7 @@
+ 	__be32 smsk;
+ 	__be32 dmsk;
+ 	__u8  tos;
++	__u8  dscp; /* brcm */
+ 	__u8  protocol;
+ 	__u8  bitmask;
+ 	__u8  invflags;
+diff -ur orig_ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_mark_t.h ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_mark_t.h
+--- orig_ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_mark_t.h	2011-12-15 15:02:48.000000000 -0500
++++ ebtables-v2.0.10-4/include/linux/netfilter_bridge/ebt_mark_t.h	2013-08-06 14:07:08.030111540 -0400
+@@ -12,6 +12,7 @@
+ #define MARK_OR_VALUE  (0xffffffe0)
+ #define MARK_AND_VALUE (0xffffffd0)
+ #define MARK_XOR_VALUE (0xffffffc0)
++#define VTAG_SET_VALUE (0xffffffb0)
+ 
+ struct ebt_mark_t_info {
+ 	unsigned long mark;
+diff -ur orig_ebtables-v2.0.10-4/Makefile ebtables-v2.0.10-4/Makefile
+--- orig_ebtables-v2.0.10-4/Makefile	2011-12-15 15:02:47.000000000 -0500
++++ ebtables-v2.0.10-4/Makefile	2013-08-06 14:07:08.030111540 -0400
+@@ -9,17 +9,38 @@
+ LOCKDIR:=$(shell echo $(LOCKFILE) | sed 's/\(.*\)\/.*/\1/')/
+ 
+ # default paths
+-LIBDIR:=/usr/lib
+ MANDIR:=/usr/local/man
+-BINDIR:=/usr/local/sbin
+ ETCDIR:=/etc
+ INITDIR:=/etc/rc.d/init.d
+ SYSCONFIGDIR:=/etc/sysconfig
+-DESTDIR:=
++
++#BRCM begin
++
++#LIBDIR:=/usr/lib
++LIBDIR?=/usr/lib
++
++#BINDIR:=/usr/local/sbin
++BINDIR:=/bin
++
++#DESTDIR:=
++DESTDIR?=
++
++#BRCM_ROOT := -o root -g root
++BRCM_ROOT :=
++
++$(info --------------------------)
++$(info - ebtables            )
++$(info - DESTDIR=$(DESTDIR)     )
++$(info - LIBDIR=$(LIBDIR)       )
++$(info - KERNEL_INCLUDES=$(KERNEL_INCLUDES)       )
++$(info - CC=$(CC)       )
++$(info --------------------------)
++#BRCM end
++
+ 
+ CFLAGS:=-Wall -Wunused -Werror
+ CFLAGS_SH_LIB:=-fPIC -O3
+-CC:=gcc
++CC?=gcc
+ 
+ ifeq ($(shell uname -m),sparc64)
+ CFLAGS+=-DEBT_MIN_ALIGN=8 -DKERNEL_64_USERSPACE_32
+@@ -157,31 +178,31 @@
+ scripts: ebtables-save ebtables.sysv ebtables-config
+ 	cat ebtables-save | sed 's/__EXEC_PATH__/$(tmp1)/g' > ebtables-save_
+ 	mkdir -p $(DESTDIR)$(BINDIR)
+-	install -m 0755 -o root -g root ebtables-save_ $(DESTDIR)$(BINDIR)/ebtables-save
++	install -m 0755 $(BRCM_ROOT) ebtables-save_ $(DESTDIR)$(BINDIR)/ebtables-save
+ 	cat ebtables.sysv | sed 's/__EXEC_PATH__/$(tmp1)/g' | sed 's/__SYSCONFIG__/$(tmp2)/g' > ebtables.sysv_
+ 	if [ "$(DESTDIR)" != "" ]; then mkdir -p $(DESTDIR)$(INITDIR); fi
+-	if test -d $(DESTDIR)$(INITDIR); then install -m 0755 -o root -g root ebtables.sysv_ $(DESTDIR)$(INITDIR)/ebtables; fi
++	if test -d $(DESTDIR)$(INITDIR); then install -m 0755 $(BRCM_ROOT) ebtables.sysv_ $(DESTDIR)$(INITDIR)/ebtables; fi
+ 	cat ebtables-config | sed 's/__SYSCONFIG__/$(tmp2)/g' > ebtables-config_
+ 	if [ "$(DESTDIR)" != "" ]; then mkdir -p $(DESTDIR)$(SYSCONFIGDIR); fi
+-	if test -d $(DESTDIR)$(SYSCONFIGDIR); then install -m 0600 -o root -g root ebtables-config_ $(DESTDIR)$(SYSCONFIGDIR)/ebtables-config; fi
++	if test -d $(DESTDIR)$(SYSCONFIGDIR); then install -m 0600 $(BRCM_ROOT) ebtables-config_ $(DESTDIR)$(SYSCONFIGDIR)/ebtables-config; fi
+ 	rm -f ebtables-save_ ebtables.sysv_ ebtables-config_
+ 
+ tmp4:=$(shell printf $(LOCKFILE) | sed 's/\//\\\//g')
+ $(MANDIR)/man8/ebtables.8: ebtables.8
+ 	mkdir -p $(DESTDIR)$(@D)
+ 	sed -e 's/$$(VERSION)/$(PROGVERSION)/' -e 's/$$(DATE)/$(PROGDATE)/' -e 's/$$(LOCKFILE)/$(tmp4)/' ebtables.8 > ebtables.8_
+-	install -m 0644 -o root -g root ebtables.8_ $(DESTDIR)$@
++	install -m 0644 $(BRCM_ROOT) ebtables.8_ $(DESTDIR)$@
+ 	rm -f ebtables.8_
+ 
+ $(DESTDIR)$(ETHERTYPESFILE): ethertypes
+ 	mkdir -p $(@D)
+-	install -m 0644 -o root -g root $< $@
++	install -m 0644 $(BRCM_ROOT) $< $@
+ 
+ .PHONY: exec
+ exec: ebtables ebtables-restore
+ 	mkdir -p $(DESTDIR)$(BINDIR)
+-	install -m 0755 -o root -g root $(PROGNAME) $(DESTDIR)$(BINDIR)/$(PROGNAME)
+-	install -m 0755 -o root -g root ebtables-restore $(DESTDIR)$(BINDIR)/ebtables-restore
++	install -m 0755 $(BRCM_ROOT) $(PROGNAME) $(DESTDIR)$(BINDIR)/$(PROGNAME)
++	install -m 0755 $(BRCM_ROOT) ebtables-restore $(DESTDIR)$(BINDIR)/ebtables-restore
+ 
+ .PHONY: install
+ install: $(MANDIR)/man8/ebtables.8 $(DESTDIR)$(ETHERTYPESFILE) exec scripts
+@@ -205,18 +226,18 @@
+ 	rm -f extensions/ebt_inat.c
+ 	rm -rf $(CVSDIRS)
+ 	mkdir -p include/linux/netfilter_bridge
+-	install -m 0644 -o root -g root \
++	install -m 0644 $(BRCM_ROOT) \
+ 		$(KERNEL_INCLUDES)/linux/netfilter_bridge.h include/linux/
+ # To keep possible compile error complaints about undefined ETH_P_8021Q
+ # off my back
+-	install -m 0644 -o root -g root \
++	install -m 0644 $(BRCM_ROOT) \
+ 		$(KERNEL_INCLUDES)/linux/if_ether.h include/linux/
+-	install -m 0644 -o root -g root \
++	install -m 0644 $(BRCM_ROOT) \
+ 		$(KERNEL_INCLUDES)/linux/types.h include/linux/
+-	install -m 0644 -o root -g root \
++	install -m 0644 $(BRCM_ROOT) \
+ 		$(KERNEL_INCLUDES)/linux/netfilter_bridge/*.h \
+ 		include/linux/netfilter_bridge/
+-	install -m 0644 -o root -g root \
++	install -m 0644 $(BRCM_ROOT) \
+ 		include/ebtables.h include/linux/netfilter_bridge/
+ 	make clean
+ 	touch *

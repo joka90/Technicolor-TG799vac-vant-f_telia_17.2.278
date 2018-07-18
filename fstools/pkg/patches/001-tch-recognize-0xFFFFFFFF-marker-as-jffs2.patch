@@ -1,0 +1,27 @@
+From 309f3fa6afdf31176cabb35438662b5dc4f7e734 Mon Sep 17 00:00:00 2001
+From: Karl Vogel <karl.vogel@technicolor.com>
+Date: Wed, 2 Mar 2016 15:33:59 +0100
+Subject: [PATCH] Recognize 0xFFFFFFFF marker as JFFS2
+
+---
+ libfstools/mtd.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libfstools/mtd.c b/libfstools/mtd.c
+index 156d166..69c5434 100644
+--- a/libfstools/mtd.c
++++ b/libfstools/mtd.c
+@@ -212,6 +212,10 @@ static int mtd_volume_identify(struct volume *v)
+ 		return FS_JFFS2;
+ 	}
+ 
++	if (v->type == NANDFLASH && deadc0de == 0xffffffff) {
++		return FS_JFFS2;
++	}
++
+ 	if (v->type == UBIVOLUME && deadc0de == 0xffffffff) {
+ 		return FS_JFFS2;
+ 	}
+-- 
+2.7.1
+

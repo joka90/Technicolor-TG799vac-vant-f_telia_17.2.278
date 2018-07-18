@@ -1,0 +1,29 @@
+--- a/commands-wms.c
++++ b/commands-wms.c
+@@ -88,7 +88,7 @@ pdu_decode_7bit_char(char *dest, int len
+ 	int cur_len = 0;
+ 	uint16_t outc;
+ 
+-	fprintf(stderr, " %02x", c);
++	//fprintf(stderr, " %02x", c);
+ 	dest += len;
+ 	if (*escape) {
+ 		*escape = false;
+@@ -161,7 +161,7 @@ pdu_decode_7bit_str(char *dest, const un
+ 	int len = 0;
+ 	int i;
+ 
+-	fprintf(stderr, "Raw text:");
++	//fprintf(stderr, "Raw text:");
+ 	for (i = 0; i < data_len; i++) {
+ 		int pos = (i + bit_offset) % 7;
+ 
+@@ -179,7 +179,7 @@ pdu_decode_7bit_str(char *dest, const un
+ 		}
+ 	}
+ 	dest[len] = 0;
+-	fprintf(stderr, "\n");
++	//fprintf(stderr, "\n");
+ 	return len;
+ }
+ 

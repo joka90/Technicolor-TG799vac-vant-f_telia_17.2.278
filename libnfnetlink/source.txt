@@ -1,0 +1,4 @@
+Source: libnfnetlink-1.0.1.tar.bz2
+Source-Url: http://www.netfilter.org/projects/libnfnetlink/files/ ftp://ftp.netfilter.org/pub/libnfnetlink/ http://mirrors.evolva.ro/netfilter.org/libnfnetlink/
+Source-Version: 
+Source-Proto: 

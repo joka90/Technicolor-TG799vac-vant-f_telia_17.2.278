@@ -1,0 +1,30 @@
+From 4cb06c72131e37fa9058707e11497cfd905b1a89 Mon Sep 17 00:00:00 2001
+From: Hans Dedecker <dedeckeh@gmail.com>
+Date: Wed, 17 May 2017 14:49:17 +0200
+Subject: [PATCH] ubus: increase ubus network interface dump timeout
+
+When netifd is being stressed (eg doing reconfig using multiple interfaces)
+ubus timeouts can be observed when invoking network interface dump.
+Increase the ubus timeout to 2000 msec similar to the service ubus timeout.
+
+Signed-off-by: Hans Dedecker <dedeckeh@gmail.com>
+---
+ ubus.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ubus.c b/ubus.c
+index dd1075f..bcbe1e8 100644
+--- a/ubus.c
++++ b/ubus.c
+@@ -51,7 +51,7 @@ fw3_ubus_connect(void)
+ 	if (ubus_lookup_id(ctx, "network.interface", &id))
+ 		goto out;
+ 
+-	if (ubus_invoke(ctx, id, "dump", NULL, dump_cb, NULL, 500))
++	if (ubus_invoke(ctx, id, "dump", NULL, dump_cb, NULL, 2000))
+ 		goto out;
+ 
+ 	status = true;
+-- 
+1.9.1
+

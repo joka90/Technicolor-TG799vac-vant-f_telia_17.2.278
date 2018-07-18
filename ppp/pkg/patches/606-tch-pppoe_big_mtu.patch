@@ -1,0 +1,11 @@
+--- a/pppd/plugins/rp-pppoe/pppoe.h
++++ b/pppd/plugins/rp-pppoe/pppoe.h
+@@ -161,7 +161,7 @@ extern UINT16_t Eth_PPPOE_Session;
+    sizes would need to be properly de-coupled from
+    the default MRU. For now, getting up to 1500 is
+    enough. */
+-#define ETH_JUMBO_LEN 1508
++#define ETH_JUMBO_LEN 2000
+ 
+ /* A PPPoE Packet, including Ethernet headers */
+ typedef struct PPPoEPacketStruct {

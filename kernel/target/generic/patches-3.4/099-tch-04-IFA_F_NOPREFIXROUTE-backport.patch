@@ -1,0 +1,294 @@
+--- a/include/linux/if_addr.h
++++ b/include/linux/if_addr.h
+@@ -44,6 +44,7 @@ enum {
+ #define IFA_F_DEPRECATED	0x20
+ #define IFA_F_TENTATIVE		0x40
+ #define IFA_F_PERMANENT		0x80
++#define IFA_F_NOPREFIXROUTE	0x200
+ 
+ struct ifa_cacheinfo {
+ 	__u32	ifa_prefered;
+--- a/net/ipv6/addrconf.c
++++ b/net/ipv6/addrconf.c
+@@ -149,6 +149,11 @@ static void addrconf_type_change(struct
+ 				 unsigned long event);
+ static int addrconf_ifdown(struct net_device *dev, int how);
+ 
++static struct rt6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
++						  int plen,
++						  const struct net_device *dev,
++						  u32 flags, u32 noflags);
++
+ static void addrconf_dad_start(struct inet6_ifaddr *ifp, u32 flags);
+ static void addrconf_dad_timer(unsigned long data);
+ static void addrconf_dad_completed(struct inet6_ifaddr *ifp);
+@@ -730,15 +735,94 @@ out:
+ 	goto out2;
+ }
+ 
++enum cleanup_prefix_rt_t {
++	CLEANUP_PREFIX_RT_NOP,    /* no cleanup action for prefix route */
++	CLEANUP_PREFIX_RT_DEL,    /* delete the prefix route */
++	CLEANUP_PREFIX_RT_EXPIRE, /* update the lifetime of the prefix route */
++};
++
++/*
++ * Check, whether the prefix for ifp would still need a prefix route
++ * after deleting ifp. The function returns one of the CLEANUP_PREFIX_RT_*
++ * constants.
++ *
++ * 1) we don't purge prefix if address was not permanent.
++ *    prefix is managed by its own lifetime.
++ * 2) we also don't purge, if the address was IFA_F_NOPREFIXROUTE.
++ * 3) if there are no addresses, delete prefix.
++ * 4) if there are still other permanent address(es),
++ *    corresponding prefix is still permanent.
++ * 5) if there are still other addresses with IFA_F_NOPREFIXROUTE,
++ *    don't purge the prefix, assume user space is managing it.
++ * 6) otherwise, update prefix lifetime to the
++ *    longest valid lifetime among the corresponding
++ *    addresses on the device.
++ *    Note: subsequent RA will update lifetime.
++ **/
++static enum cleanup_prefix_rt_t
++check_cleanup_prefix_route(struct inet6_ifaddr *ifp, unsigned long *expires)
++{
++	struct inet6_ifaddr *ifa;
++	struct inet6_dev *idev = ifp->idev;
++	unsigned long lifetime;
++	enum cleanup_prefix_rt_t action = CLEANUP_PREFIX_RT_DEL;
++
++	*expires = jiffies;
++
++	list_for_each_entry(ifa, &idev->addr_list, if_list) {
++		if (ifa == ifp)
++			continue;
++		if (!ipv6_prefix_equal(&ifa->addr, &ifp->addr,
++					ifp->prefix_len))
++			continue;
++		if (ifa->flags & (IFA_F_PERMANENT | IFA_F_NOPREFIXROUTE))
++			return CLEANUP_PREFIX_RT_NOP;
++
++		action = CLEANUP_PREFIX_RT_EXPIRE;
++
++		spin_lock(&ifa->lock);
++
++		lifetime = addrconf_timeout_fixup(ifa->valid_lft, HZ);
++		/*
++		 * Note: Because this address is
++		 * not permanent, lifetime <
++		 * LONG_MAX / HZ here.
++		 */
++		if (time_before(*expires, ifa->tstamp + lifetime * HZ))
++			*expires = ifa->tstamp + lifetime * HZ;
++		spin_unlock(&ifa->lock);
++	}
++
++	return action;
++}
++
++static void
++cleanup_prefix_route(struct inet6_ifaddr *ifp, unsigned long expires, bool del_rt)
++{
++	struct rt6_info *rt;
++
++	rt = addrconf_get_prefix_route(&ifp->addr,
++				       ifp->prefix_len,
++				       ifp->idev->dev,
++				       0, RTF_GATEWAY | RTF_DEFAULT);
++	if (rt) {
++		if (del_rt)
++			ip6_del_rt(rt);
++		else {
++			if (!(rt->rt6i_flags & RTF_EXPIRES))
++				rt6_set_expires(rt, expires);
++			dst_release(&rt->dst);
++		}
++	}
++}
++
+ /* This function wants to get referenced ifp and releases it before return */
+ 
+ static void ipv6_del_addr(struct inet6_ifaddr *ifp)
+ {
+-	struct inet6_ifaddr *ifa, *ifn;
+-	struct inet6_dev *idev = ifp->idev;
+ 	int state;
+-	int deleted = 0, onlink = 0;
+-	unsigned long expires = jiffies;
++	enum cleanup_prefix_rt_t action = CLEANUP_PREFIX_RT_NOP;
++	unsigned long expires;
+ 
+ 	spin_lock_bh(&ifp->state_lock);
+ 	state = ifp->state;
+@@ -752,7 +836,7 @@ static void ipv6_del_addr(struct inet6_i
+ 	hlist_del_init_rcu(&ifp->addr_lst);
+ 	spin_unlock_bh(&addrconf_hash_lock);
+ 
+-	write_lock_bh(&idev->lock);
++	write_lock_bh(&ifp->idev->lock);
+ #ifdef CONFIG_IPV6_PRIVACY
+ 	if (ifp->flags&IFA_F_TEMPORARY) {
+ 		list_del(&ifp->tmp_list);
+@@ -764,45 +848,13 @@ static void ipv6_del_addr(struct inet6_i
+ 	}
+ #endif
+ 
+-	list_for_each_entry_safe(ifa, ifn, &idev->addr_list, if_list) {
+-		if (ifa == ifp) {
+-			list_del_init(&ifp->if_list);
+-			__in6_ifa_put(ifp);
++	if (ifp->flags & IFA_F_PERMANENT && !(ifp->flags & IFA_F_NOPREFIXROUTE))
++		action = check_cleanup_prefix_route(ifp, &expires);
+ 
+-			if (!(ifp->flags & IFA_F_PERMANENT) || onlink > 0)
+-				break;
+-			deleted = 1;
+-			continue;
+-		} else if (ifp->flags & IFA_F_PERMANENT) {
+-			if (ipv6_prefix_equal(&ifa->addr, &ifp->addr,
+-					      ifp->prefix_len)) {
+-				if (ifa->flags & IFA_F_PERMANENT) {
+-					onlink = 1;
+-					if (deleted)
+-						break;
+-				} else {
+-					unsigned long lifetime;
+-
+-					if (!onlink)
+-						onlink = -1;
++	list_del_init(&ifp->if_list);
++	__in6_ifa_put(ifp);
+ 
+-					spin_lock(&ifa->lock);
+-
+-					lifetime = addrconf_timeout_fixup(ifa->valid_lft, HZ);
+-					/*
+-					 * Note: Because this address is
+-					 * not permanent, lifetime <
+-					 * LONG_MAX / HZ here.
+-					 */
+-					if (time_before(expires,
+-							ifa->tstamp + lifetime * HZ))
+-						expires = ifa->tstamp + lifetime * HZ;
+-					spin_unlock(&ifa->lock);
+-				}
+-			}
+-		}
+-	}
+-	write_unlock_bh(&idev->lock);
++	write_unlock_bh(&ifp->idev->lock);
+ 
+ 	addrconf_del_timer(ifp);
+ 
+@@ -810,37 +862,9 @@ static void ipv6_del_addr(struct inet6_i
+ 
+ 	atomic_notifier_call_chain(&inet6addr_chain, NETDEV_DOWN, ifp);
+ 
+-	/*
+-	 * Purge or update corresponding prefix
+-	 *
+-	 * 1) we don't purge prefix here if address was not permanent.
+-	 *    prefix is managed by its own lifetime.
+-	 * 2) if there're no addresses, delete prefix.
+-	 * 3) if there're still other permanent address(es),
+-	 *    corresponding prefix is still permanent.
+-	 * 4) otherwise, update prefix lifetime to the
+-	 *    longest valid lifetime among the corresponding
+-	 *    addresses on the device.
+-	 *    Note: subsequent RA will update lifetime.
+-	 *
+-	 * --yoshfuji
+-	 */
+-	if ((ifp->flags & IFA_F_PERMANENT) && onlink < 1) {
+-		struct in6_addr prefix;
+-		struct rt6_info *rt;
+-		struct net *net = dev_net(ifp->idev->dev);
+-		ipv6_addr_prefix(&prefix, &ifp->addr, ifp->prefix_len);
+-		rt = rt6_lookup(net, &prefix, NULL, ifp->idev->dev->ifindex, 1);
+-
+-		if (rt && addrconf_is_prefix_route(rt)) {
+-			if (onlink == 0) {
+-				ip6_del_rt(rt);
+-				rt = NULL;
+-			} else if (!(rt->rt6i_flags & RTF_EXPIRES)) {
+-				rt6_set_expires(rt, expires);
+-			}
+-		}
+-		dst_release(&rt->dst);
++	if (action != CLEANUP_PREFIX_RT_NOP) {
++		cleanup_prefix_route(ifp, expires,
++			action == CLEANUP_PREFIX_RT_DEL);
+ 	}
+ 
+ 	/* clean up prefsrc entries */
+@@ -2263,8 +2287,11 @@ static int inet6_addr_add(struct net *ne
+ 		ifp->tstamp = jiffies;
+ 		spin_unlock_bh(&ifp->lock);
+ 
+-		addrconf_prefix_route(&ifp->addr, ifp->prefix_len, dev,
+-				      expires, flags);
++		if (!(ifa_flags & IFA_F_NOPREFIXROUTE)) {
++			addrconf_prefix_route(&ifp->addr, ifp->prefix_len, dev,
++						expires, flags);
++		}
++
+ 		/*
+ 		 * Note that section 3.1 of RFC 4429 indicates
+ 		 * that the Optimistic flag should not be set for
+@@ -3516,6 +3543,7 @@ static int inet6_addr_modify(struct inet
+ 	u32 flags;
+ 	clock_t expires;
+ 	unsigned long timeout;
++	bool had_prefixroute;
+ 
+ 	if (!valid_lft || (prefered_lft > valid_lft))
+ 		return -EINVAL;
+@@ -3539,7 +3567,11 @@ static int inet6_addr_modify(struct inet
+ 	}
+ 
+ 	spin_lock_bh(&ifp->lock);
+-	ifp->flags = (ifp->flags & ~(IFA_F_DEPRECATED | IFA_F_PERMANENT | IFA_F_NODAD | IFA_F_HOMEADDRESS)) | ifa_flags;
++	had_prefixroute = ifp->flags & IFA_F_PERMANENT &&
++		    !(ifp->flags & IFA_F_NOPREFIXROUTE);
++	ifp->flags &= ~(IFA_F_DEPRECATED | IFA_F_PERMANENT | IFA_F_NODAD |
++			IFA_F_HOMEADDRESS | IFA_F_NOPREFIXROUTE);
++	ifp->flags |= ifa_flags;
+ 	ifp->tstamp = jiffies;
+ 	ifp->valid_lft = valid_lft;
+ 	ifp->prefered_lft = prefered_lft;
+@@ -3548,8 +3580,23 @@ static int inet6_addr_modify(struct inet
+ 	if (!(ifp->flags&IFA_F_TENTATIVE))
+ 		ipv6_ifa_notify(0, ifp);
+ 
+-	addrconf_prefix_route(&ifp->addr, ifp->prefix_len, ifp->idev->dev,
+-			      expires, flags);
++	if (!(ifa_flags & IFA_F_NOPREFIXROUTE)) {
++		addrconf_prefix_route(&ifp->addr, ifp->prefix_len, ifp->idev->dev,
++				expires, flags);
++	} else if (had_prefixroute) {
++		enum cleanup_prefix_rt_t action;
++		unsigned long rt_expires;
++
++		write_lock_bh(&ifp->idev->lock);
++		action = check_cleanup_prefix_route(ifp, &rt_expires);
++		write_unlock_bh(&ifp->idev->lock);
++
++		if (action != CLEANUP_PREFIX_RT_NOP) {
++			cleanup_prefix_route(ifp, rt_expires,
++				action == CLEANUP_PREFIX_RT_DEL);
++		}
++	}
++
+ 	addrconf_verify(0);
+ 
+ 	return 0;
+@@ -3593,7 +3640,7 @@ inet6_rtm_newaddr(struct sk_buff *skb, s
+ 		return -ENODEV;
+ 
+ 	/* We ignore other flags so far. */
+-	ifa_flags = ifm->ifa_flags & (IFA_F_NODAD | IFA_F_HOMEADDRESS);
++	ifa_flags = ifm->ifa_flags & (IFA_F_NODAD | IFA_F_HOMEADDRESS | IFA_F_NOPREFIXROUTE);
+ 
+ 	ifa = ipv6_get_ifaddr(net, pfx, dev, 1);
+ 	if (ifa == NULL) {

@@ -1,0 +1,4 @@
+Source: xl2tpd-devel-20151125.tar.gz
+Source-Url: https://github.com/xelerance/xl2tpd.git
+Source-Version: e2065bf0fc22ba33001ad503c01bba01648024a8
+Source-Proto: 

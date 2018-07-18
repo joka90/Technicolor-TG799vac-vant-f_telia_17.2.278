@@ -1,0 +1,36 @@
+USB: option: add 2020:4000 ID
+
+Add device Olivetti Olicard 300 (Network Connect: MT6225) - IDs 2020:4000.
+
+T:  Bus=01 Lev=02 Prnt=04 Port=00 Cnt=01 Dev#= 10 Spd=480 MxCh= 0
+D:  Ver= 2.00 Cls=ef(misc ) Sub=02 Prot=01 MxPS=64 #Cfgs=  1
+P:  Vendor=2020 ProdID=4000 Rev=03.00
+S:  Manufacturer=Network Connect
+S:  Product=MT6225
+C:  #Ifs= 7 Cfg#= 1 Atr=a0 MxPwr=500mA
+I:  If#= 0 Alt= 0 #EPs= 1 Cls=02(commc) Sub=0e Prot=00 Driver=cdc_mbim
+I:  If#= 1 Alt= 1 #EPs= 2 Cls=0a(data ) Sub=00 Prot=02 Driver=cdc_mbim
+I:  If#= 2 Alt= 0 #EPs= 3 Cls=ff(vend.) Sub=02 Prot=01 Driver=option
+I:  If#= 3 Alt= 0 #EPs= 2 Cls=ff(vend.) Sub=00 Prot=00 Driver=option
+I:  If#= 4 Alt= 0 #EPs= 2 Cls=ff(vend.) Sub=00 Prot=00 Driver=option
+I:  If#= 5 Alt= 0 #EPs= 2 Cls=ff(vend.) Sub=00 Prot=00 Driver=option
+I:  If#= 6 Alt= 0 #EPs= 2 Cls=08(stor.) Sub=06 Prot=50 Driver=usb-storage
+
+Signed-off-by: Claudio Cappelli <claudio.cappelli.linux@gmail.com>
+Suggested-by: Lars Melin <larsm17@gmail.com>
+Cc: stable <stable@vger.kernel.org>
+[johan: amend commit message with devices info ]
+Signed-off-by: Johan Hovold <johan@kernel.org>
+
+See https://github.com/torvalds/linux/commit/f6d7fb37f92622479ef6da604f27561f5045ba1e for more info
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -1702,6 +1702,8 @@ static const struct usb_device_id option
+ 	{ USB_DEVICE(0x2C7C, 0x0125) }, /* Quectel EC25 */
+ 	{ USB_DEVICE(0x2C7C, 0x0121) }, /* Quectel EC21 */
+ 
++	{ USB_DEVICE_INTERFACE_CLASS(0x2020, 0x4000, 0xff) },                /* OLICARD300 - MT6225 */
++
+ 	{ } /* Terminating entry */
+ };
+ MODULE_DEVICE_TABLE(usb, option_ids);

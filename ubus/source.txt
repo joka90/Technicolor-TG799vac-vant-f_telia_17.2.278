@@ -1,0 +1,4 @@
+Source: ubus-2017-02-03-34c6e818e431cc53478a0f7c7c1eca07d194d692.tar.xz
+Source-Url: http://git.openwrt.org/project/ubus.git
+Source-Version: 34c6e818e431cc53478a0f7c7c1eca07d194d692
+Source-Proto: 

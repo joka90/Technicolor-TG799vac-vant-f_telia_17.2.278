@@ -1,0 +1,42 @@
+--- a/commands-dms.h
++++ b/commands-dms.h
+@@ -40,11 +40,13 @@
+ 	__uqmi_command(dms_set_operating_mode, set-device-operating-mode, required, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_reset, reset-dms, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_get_model, get-model, no, QMI_SERVICE_DMS), \
+-	__uqmi_command(dms_get_manufacturer, get-manufacturer, no, QMI_SERVICE_DMS) \
++	__uqmi_command(dms_get_manufacturer, get-manufacturer, no, QMI_SERVICE_DMS), \
++	__uqmi_command(dms_get_revision, get-revision, no, QMI_SERVICE_DMS) \
+ 
+ #define dms_helptext \
+ 		"  --get-model:                      Get device model\n" \
+ 		"  --get-manufacturer:               Get device manufacturer\n" \
++		"  --get-revision:                   Get device revision\n" \
+ 		"  --get-capabilities:               List device capabilities\n" \
+ 		"  --get-pin-status:                 Get PIN verification status\n" \
+ 		"  --verify-pin1 <pin>:              Verify PIN1\n" \
+--- a/commands-dms.c
++++ b/commands-dms.c
+@@ -393,6 +393,22 @@ static void cmd_dms_get_manufacturer_cb(
+ }
+ 
+ static enum qmi_cmd_result
++cmd_dms_get_revision_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_dms_get_revision_request(msg);
++	return QMI_CMD_REQUEST;
++}
++
++static void cmd_dms_get_revision_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_dms_get_revision_response res;
++
++	qmi_parse_dms_get_revision_response(msg, &res);
++	if (res.data.revision)
++		blobmsg_add_string(&status, NULL, res.data.revision);
++}
++
++static enum qmi_cmd_result
+ cmd_dms_get_manufacturer_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
+ {
+ 	qmi_set_dms_get_manufacturer_request(msg);

@@ -1,0 +1,103 @@
+---
+ src/forward.c |   39 ++++++++++++++++++++++++++++++++-------
+ src/option.c  |    2 ++
+ 2 files changed, 34 insertions(+), 7 deletions(-)
+
+--- a/src/forward.c
++++ b/src/forward.c
+@@ -325,7 +325,12 @@ static int forward_query(int udpfd, unio
+       /* retry on existing query, send to all available servers  */
+       domain = forward->sentto->domain;
+       forward->sentto->failed_queries++;
+-      if (!option_bool(OPT_ORDER))
++      if (option_bool(OPT_STICKY_SERVERS))
++	{
++	  forward->forwardall = 0;
++	  daemon->last_server = NULL;  /* the last server is not available any more  */
++	}
++      else if (!option_bool(OPT_ORDER))
+ 	{
+ 	  forward->forwardall = 1;
+ 	  daemon->last_server = NULL;
+@@ -386,7 +391,12 @@ static int forward_query(int udpfd, unio
+ 	  
+ 	  if (type == 0)
+ 	    {
+-	      if (option_bool(OPT_ORDER))
++	      if (option_bool(OPT_STICKY_SERVERS))
++	        {
++                  if (!(start = daemon->last_server))
++                     start = daemon->servers;
++	        }
++	      else if (option_bool(OPT_ORDER))
+ 		start = daemon->servers;
+ 	      else if (!(start = daemon->last_server) ||
+ 		       daemon->forwardcount++ > FORWARD_TEST ||
+@@ -400,9 +410,17 @@ static int forward_query(int udpfd, unio
+ 	    }
+ 	  else
+ 	    {
+-	      start = daemon->servers;
+-	      if (!option_bool(OPT_ORDER))
+-		forward->forwardall = 1;
++	      if (option_bool(OPT_STICKY_SERVERS))
++		{
++		  if (!(start = daemon->last_server))
++		    start = daemon->servers;
++		}
++	      else
++		{
++		  start = daemon->servers;
++      		  if (!option_bool(OPT_ORDER))
++		    forward->forwardall = 1;
++		}
+ 	    }
+ 	}
+     }
+@@ -1902,7 +1920,7 @@ unsigned char *tcp_request(int confd, ti
+ 	      
+ 	      type &= ~SERV_DO_DNSSEC;
+ 	      
+-	      if (type != 0  || option_bool(OPT_ORDER) || !daemon->last_server)
++	      if (type != 0  || (option_bool(OPT_ORDER) && !option_bool(OPT_STICKY_SERVERS)) || !daemon->last_server)
+ 		last_server = daemon->servers;
+ 	      else
+ 		last_server = daemon->last_server;
+--- a/src/option.c
++++ b/src/option.c
+@@ -161,6 +161,7 @@ struct myoption {
+ #define LOPT_TFTP_MTU      349
+ #define LOPT_REPLY_DELAY   350
+ #define LOPT_DNSFILTER     351
++#define LOPT_STICKY_SERVERS 352
+ 
+ #ifdef HAVE_GETOPT_LONG
+ static const struct option opts[] =  
+@@ -327,6 +328,7 @@ static const struct myoption opts[] =
+     { "script-arp", 0, 0, LOPT_SCRIPT_ARP },
+     { "dhcp-ttl", 1, 0 , LOPT_DHCPTTL },
+     { "dhcp-reply-delay", 1, 0, LOPT_REPLY_DELAY },
++    { "sticky-servers", 0, 0, LOPT_STICKY_SERVERS },
+     { NULL, 0, 0, 0 }
+   };
+ 
+@@ -500,6 +502,7 @@ static struct {
+   { LOPT_IGNORE_ADDR, ARG_DUP, "<ipaddr>", gettext_noop("Ignore DNS responses containing ipaddr."), NULL }, 
+   { LOPT_DHCPTTL, ARG_ONE, "<ttl>", gettext_noop("Set TTL in DNS responses with DHCP-derived addresses."), NULL }, 
+   { LOPT_REPLY_DELAY, ARG_ONE, "<integer>", gettext_noop("Delay DHCP replies for at least number of seconds."), NULL },
++  { LOPT_STICKY_SERVERS, OPT_STICKY_SERVERS, NULL, gettext_noop("Send request to servers one by one, and always use this one if available"), NULL },
+   { 0, 0, NULL, NULL, NULL }
+ }; 
+ 
+--- a/src/dnsmasq.h
++++ b/src/dnsmasq.h
+@@ -245,7 +245,8 @@ struct event_desc {
+ #define OPT_MAC_B64        54
+ #define OPT_MAC_HEX        55
+ #define OPT_TFTP_APREF_MAC 56
+-#define OPT_LAST           57
++#define OPT_STICKY_SERVERS 57
++#define OPT_LAST           58
+ 
+ /* extra flags for my_syslog, we use a couple of facilities since they are known 
+    not to occupy the same bits as priorities, no matter how syslog.h is set up. */

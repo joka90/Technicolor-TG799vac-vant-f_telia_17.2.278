@@ -1,0 +1,4 @@
+Source: strongswan-5.5.1.tar.bz2
+Source-Url: http://download.strongswan.org/ http://download2.strongswan.org/
+Source-Version: 
+Source-Proto: 

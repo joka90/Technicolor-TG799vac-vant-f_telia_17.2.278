@@ -1,0 +1,105 @@
+diff --git a/include/linux/if_vlan.h b/include/linux/if_vlan.h
+index a1d3762..638d97d 100644
+--- a/include/linux/if_vlan.h
++++ b/include/linux/if_vlan.h
+@@ -365,6 +365,8 @@ static inline void vlan_set_encap_proto(struct sk_buff *skb,
+ enum vlan_ioctl_cmds {
+ 	ADD_VLAN_CMD,
+ 	DEL_VLAN_CMD,
++	FLUSH_VLAN_INGRESS_PRIORITY_CMD,
++	FLUSH_VLAN_EGRESS_PRIORITY_CMD,
+ 	SET_VLAN_INGRESS_PRIORITY_CMD,
+ 	SET_VLAN_EGRESS_PRIORITY_CMD,
+ 	GET_VLAN_INGRESS_PRIORITY_CMD,
+diff --git a/net/8021q/vlan.c b/net/8021q/vlan.c
+index 64da947..5b6bb54 100644
+--- a/net/8021q/vlan.c
++++ b/net/8021q/vlan.c
+@@ -871,6 +871,8 @@ static int vlan_ioctl_handler(struct net *net, void __user *arg)
+ 	rtnl_lock();
+ 
+ 	switch (args.cmd) {
++	case FLUSH_VLAN_INGRESS_PRIORITY_CMD:
++	case FLUSH_VLAN_EGRESS_PRIORITY_CMD:
+ 	case SET_VLAN_INGRESS_PRIORITY_CMD:
+ 	case SET_VLAN_EGRESS_PRIORITY_CMD:
+ 	case SET_VLAN_FLAG_CMD:
+@@ -889,6 +891,22 @@ static int vlan_ioctl_handler(struct net *net, void __user *arg)
+ 	}
+ 
+ 	switch (args.cmd) {
++	case FLUSH_VLAN_INGRESS_PRIORITY_CMD:
++		err = -EPERM;
++		if (!capable(CAP_NET_ADMIN))
++			break;
++		vlan_dev_flush_ingress_priority(dev);
++		err = 0;
++		break;
++
++	case FLUSH_VLAN_EGRESS_PRIORITY_CMD:
++		err = -EPERM;
++		if (!capable(CAP_NET_ADMIN))
++			break;
++		vlan_dev_flush_egress_priority(dev);
++		err = 0;
++		break;
++
+ 	case SET_VLAN_INGRESS_PRIORITY_CMD:
+ 		err = -EPERM;
+ 		if (!capable(CAP_NET_ADMIN))
+diff --git a/net/8021q/vlan.h b/net/8021q/vlan.h
+index 4fe94ad..64be172 100644
+--- a/net/8021q/vlan.h
++++ b/net/8021q/vlan.h
+@@ -146,8 +146,10 @@ static inline struct net_device *vlan_find_dev(struct net_device *real_dev,
+ /* found in vlan_dev.c */
+ void vlan_dev_set_ingress_priority(const struct net_device *dev,
+ 				   u32 skb_prio, u16 vlan_prio);
++void vlan_dev_flush_ingress_priority(const struct net_device *dev);
+ int vlan_dev_set_egress_priority(const struct net_device *dev,
+ 				 u32 skb_prio, u16 vlan_prio);
++void vlan_dev_flush_egress_priority(const struct net_device *dev);
+ int vlan_dev_change_flags(const struct net_device *dev, u32 flag, u32 mask);
+ void vlan_dev_get_realdev_name(const struct net_device *dev, char *result);
+ 
+diff --git a/net/8021q/vlan_dev.c b/net/8021q/vlan_dev.c
+index f702ddc..2f37e4a 100644
+--- a/net/8021q/vlan_dev.c
++++ b/net/8021q/vlan_dev.c
+@@ -218,6 +218,14 @@ void vlan_dev_set_ingress_priority(const struct net_device *dev,
+ 	vlan->ingress_priority_map[vlan_prio & 0x7] = skb_prio;
+ }
+ 
++void vlan_dev_flush_ingress_priority(const struct net_device *dev)
++{
++	struct vlan_dev_priv *vlan = vlan_dev_priv(dev);
++
++	memset(vlan->ingress_priority_map, 0, sizeof(vlan->ingress_priority_map));
++	vlan->nr_ingress_mappings = 0;
++}
++
+ int vlan_dev_set_egress_priority(const struct net_device *dev,
+ 				 u32 skb_prio, u16 vlan_prio)
+ {
+@@ -255,6 +263,21 @@ int vlan_dev_set_egress_priority(const struct net_device *dev,
+ 	return 0;
+ }
+ 
++void vlan_dev_flush_egress_priority(const struct net_device *dev)
++{
++	struct vlan_dev_priv *vlan = vlan_dev_priv(dev);
++	struct vlan_priority_tci_mapping *mp;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(vlan->egress_priority_map); i++) {
++		while ((mp = vlan->egress_priority_map[i]) != NULL) {
++			vlan->egress_priority_map[i] = mp->next;
++			kfree(mp);
++		}
++	}
++	vlan->nr_egress_mappings = 0;
++}
++
+ /* Flags are defined in the vlan_flags enum in include/linux/if_vlan.h file. */
+ int vlan_dev_change_flags(const struct net_device *dev, u32 flags, u32 mask)
+ {

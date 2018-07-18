@@ -1,0 +1,85 @@
+diff -rupN a/extensions/libipt_SNAT.c b/extensions/libipt_SNAT.c
+--- a/extensions/libipt_SNAT.c	2016-01-07 00:42:21.216091987 +0800
++++ b/extensions/libipt_SNAT.c	2016-01-07 00:39:05.534085725 +0800
+@@ -13,6 +13,7 @@ enum {
+ 	O_RANDOM,
+ 	O_PERSISTENT,
+ 	O_X_TO_SRC,
++	O_MODE,
+ 	F_TO_SRC   = 1 << O_TO_SRC,
+ 	F_RANDOM   = 1 << O_RANDOM,
+ 	F_X_TO_SRC = 1 << O_X_TO_SRC,
+@@ -32,7 +33,9 @@ static void SNAT_help(void)
+ "SNAT target options:\n"
+ " --to-source [<ipaddr>[-<ipaddr>]][:port[-port]]\n"
+ "				Address to map source to.\n"
+-"[--random] [--persistent]\n");
++"[--random] [--persistent]\n"
++"[--mode <fullcone|symmetric>]\n"
++"				NAT mode.\n");
+ }
+ 
+ static const struct xt_option_entry SNAT_opts[] = {
+@@ -40,6 +43,7 @@ static const struct xt_option_entry SNAT
+ 	 .flags = XTOPT_MAND | XTOPT_MULTI},
+ 	{.name = "random", .id = O_RANDOM, .type = XTTYPE_NONE},
+ 	{.name = "persistent", .id = O_PERSISTENT, .type = XTTYPE_NONE},
++    {.name = "mode", .id = O_MODE, .type = XTTYPE_STRING},
+ 	XTOPT_TABLEEND,
+ };
+ 
+@@ -163,6 +167,9 @@ static void SNAT_parse(struct xt_option_
+ 	else
+ 		portok = 0;
+ 
++	/* Borrow the flags bit 4 as mode value. The default is symmetric */
++	info->mr.range[0].flags &= ~NF_NAT_RANGE_FULLCONE;
++
+ 	xtables_option_parse(cb);
+ 	switch (cb->entry->id) {
+ 	case O_TO_SRC:
+@@ -179,6 +186,15 @@ static void SNAT_parse(struct xt_option_
+ 	case O_PERSISTENT:
+ 		info->mr.range[0].flags |= NF_NAT_RANGE_PERSISTENT;
+ 		break;
++	case O_MODE:
++		if (strcasecmp(cb->arg, "fullcone") == 0)
++			info->mr.range[0].flags |= NF_NAT_RANGE_FULLCONE;
++		else if (strcasecmp(cb->arg, "symmetric") == 0)
++			info->mr.range[0].flags &= ~NF_NAT_RANGE_FULLCONE;
++		else
++			xtables_error(PARAMETER_PROBLEM,
++				"Unknown mode %s", cb->arg);
++		break;
+ 	}
+ }
+ 
+@@ -224,6 +240,8 @@ static void SNAT_print(const void *ip, c
+ 			printf(" random");
+ 		if (info->mr.range[i].flags & NF_NAT_RANGE_PERSISTENT)
+ 			printf(" persistent");
++		if (info->mr.range[i].flags & NF_NAT_RANGE_FULLCONE)
++			printf(" mode: fullcone");
+ 	}
+ }
+ 
+@@ -239,6 +257,8 @@ static void SNAT_save(const void *ip, co
+ 			printf(" --random");
+ 		if (info->mr.range[i].flags & NF_NAT_RANGE_PERSISTENT)
+ 			printf(" --persistent");
++		if (info->mr.range[i].flags & NF_NAT_RANGE_FULLCONE)
++			printf(" --mode fullcone");
+ 	}
+ }
+ 
+diff -rupN a/include/linux/netfilter/nf_nat.h b/include/linux/netfilter/nf_nat.h
+--- a/include/linux/netfilter/nf_nat.h	2016-01-07 00:42:00.045091310 +0800
++++ b/include/linux/netfilter/nf_nat.h	2016-01-07 00:07:36.615025280 +0800
+@@ -8,6 +8,7 @@
+ #define NF_NAT_RANGE_PROTO_SPECIFIED	2
+ #define NF_NAT_RANGE_PROTO_RANDOM	4
+ #define NF_NAT_RANGE_PERSISTENT		8
++#define NF_NAT_RANGE_FULLCONE		16
+ 
+ struct nf_nat_ipv4_range {
+ 	unsigned int			flags;

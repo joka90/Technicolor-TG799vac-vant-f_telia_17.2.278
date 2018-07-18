@@ -1,0 +1,193 @@
+--- a/include/linux/netfilter/nf_nat.h
++++ b/include/linux/netfilter/nf_nat.h
+@@ -8,6 +8,7 @@
+ #define NF_NAT_RANGE_PROTO_SPECIFIED	2
+ #define NF_NAT_RANGE_PROTO_RANDOM	4
+ #define NF_NAT_RANGE_PERSISTENT		8
++#define NF_NAT_RANGE_FULLCONE		16
+ 
+ struct nf_nat_ipv4_range {
+ 	unsigned int			flags;
+--- a/net/ipv4/netfilter/nf_nat_rule.c
++++ b/net/ipv4/netfilter/nf_nat_rule.c
+@@ -25,6 +25,11 @@
+ #include <net/netfilter/nf_nat.h>
+ #include <net/netfilter/nf_nat_core.h>
+ #include <net/netfilter/nf_nat_rule.h>
++#include <net/netfilter/nf_conntrack.h>
++#include <net/netfilter/nf_conntrack_core.h>
++#include <net/netfilter/nf_conntrack_helper.h>
++#include <net/netfilter/nf_conntrack_zones.h>
++#include <net/netfilter/nf_nat_helper.h>
+ 
+ #define NAT_VALID_HOOKS ((1 << NF_INET_PRE_ROUTING) | \
+ 			 (1 << NF_INET_POST_ROUTING) | \
+@@ -38,6 +43,132 @@ static const struct xt_table nat_table =
+ 	.af		= NFPROTO_IPV4,
+ };
+ 
++/****************************************************************************/
++static void nf_snat_expect(struct nf_conn *ct,
++               struct nf_conntrack_expect *exp)
++{
++    struct nf_nat_ipv4_range range;
++
++    /* This must be a fresh one. */
++    BUG_ON(ct->status & IPS_NAT_DONE_MASK);
++
++    /* Change src to where new ct comes from */
++    range.flags = NF_NAT_RANGE_MAP_IPS;
++    range.min_ip = range.max_ip =
++        ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
++    nf_nat_setup_info(ct, &range, NF_NAT_MANIP_SRC);
++
++    /* For DST manip, map port here to where it's expected. */
++    range.flags = (NF_NAT_RANGE_MAP_IPS | NF_NAT_RANGE_PROTO_SPECIFIED);
++    range.min = range.max = exp->saved_proto;
++    range.min_ip = range.max_ip = exp->saved_ip;
++    nf_nat_setup_info(ct, &range, NF_NAT_MANIP_DST);
++}
++
++/****************************************************************************/
++static int nf_snat_help(struct sk_buff *skb, unsigned int protoff,
++            struct nf_conn *ct, enum ip_conntrack_info ctinfo)
++{
++    int dir = CTINFO2DIR(ctinfo);
++    struct nf_conn_help *help = nfct_help(ct);
++    struct nf_conntrack_expect *exp;
++
++    if (dir != IP_CT_DIR_ORIGINAL ||
++        help->expecting[NF_CT_EXPECT_CLASS_DEFAULT])
++        return NF_ACCEPT;
++
++    pr_debug("nf_snat: packet[%d bytes] ", skb->len);
++    nf_ct_dump_tuple(&ct->tuplehash[dir].tuple);
++    pr_debug("reply: ");
++    nf_ct_dump_tuple(&ct->tuplehash[!dir].tuple);
++
++    /* Create expect */
++    if ((exp = nf_ct_expect_alloc(ct)) == NULL)
++        return NF_ACCEPT;
++
++    nf_ct_expect_init(exp, NF_CT_EXPECT_CLASS_DEFAULT, AF_INET, NULL,
++              &ct->tuplehash[!dir].tuple.dst.u3, IPPROTO_UDP,
++              NULL, &ct->tuplehash[!dir].tuple.dst.u.udp.port);
++    exp->flags = NF_CT_EXPECT_PERMANENT;
++    exp->saved_ip = ct->tuplehash[dir].tuple.src.u3.ip;
++    exp->saved_proto.udp.port = ct->tuplehash[dir].tuple.src.u.udp.port;
++    exp->dir = !dir;
++    exp->expectfn = nf_snat_expect;
++
++    /* Setup expect */
++    nf_ct_expect_related(exp);
++    nf_ct_expect_put(exp);
++    pr_debug("nf_snat: expect setup\n");
++
++    return NF_ACCEPT;
++}
++
++/****************************************************************************/
++static struct nf_conntrack_expect_policy nf_snat_exp_policy __read_mostly = {
++    .max_expected   = 1000,
++    .timeout    = 240,
++};
++
++/****************************************************************************/
++static struct nf_conntrack_helper nf_conntrack_helper_snat __read_mostly = {
++    .name = "SNAT-FULLCONE",
++    .me = THIS_MODULE,
++    .tuple.src.l3num = AF_INET,
++    .tuple.dst.protonum = IPPROTO_UDP,
++    .expect_policy = &nf_snat_exp_policy,
++    .expect_class_max = 1,
++    .help = nf_snat_help,
++};
++
++/****************************************************************************/
++static inline int find_exp(__be32 ip, __be16 port, struct nf_conn *ct)
++{
++    struct nf_conntrack_tuple tuple;
++    struct nf_conntrack_expect *i = NULL;
++
++
++    memset(&tuple, 0, sizeof(tuple));
++    tuple.src.l3num = AF_INET;
++    tuple.dst.protonum = IPPROTO_UDP;
++    tuple.dst.u3.ip = ip;
++    tuple.dst.u.udp.port = port;
++
++    rcu_read_lock();
++    i = __nf_ct_expect_find(nf_ct_net(ct), nf_ct_zone(ct), &tuple);
++    rcu_read_unlock();
++
++    return i != NULL;
++}
++
++/****************************************************************************/
++static inline struct nf_conntrack_expect *find_fullcone_exp(struct nf_conn *ct)
++{
++    struct nf_conntrack_tuple * tp =
++        &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
++    struct net *net = nf_ct_net(ct);
++    struct nf_conntrack_expect * exp = NULL;
++    struct nf_conntrack_expect * i;
++    struct hlist_node *n;
++    unsigned int h;
++
++    rcu_read_lock();
++    for (h = 0; h < nf_ct_expect_hsize; h++) {
++        hlist_for_each_entry_rcu(i, n, &net->ct.expect_hash[h], hnode) {
++            if (i->saved_ip == tp->src.u3.ip &&
++                    i->saved_proto.all == tp->src.u.all &&
++                    i->tuple.dst.protonum == tp->dst.protonum &&
++                    i->tuple.src.u3.ip == 0 &&
++                    i->tuple.src.u.udp.port == 0) {
++                exp = i;
++                break;
++            }
++        }
++    }
++    rcu_read_unlock();
++
++    return exp;
++}
++
+ /* Source NAT */
+ static unsigned int
+ ipt_snat_target(struct sk_buff *skb, const struct xt_action_param *par)
+@@ -56,6 +187,27 @@ ipt_snat_target(struct sk_buff *skb, con
+ 			    ctinfo == IP_CT_RELATED_REPLY));
+ 	NF_CT_ASSERT(par->out != NULL);
+ 
++    if (mr->range[0].flags & NF_NAT_RANGE_FULLCONE /* nat_mode == full cone */
++        && (nfct_help(ct) == NULL || nfct_help(ct)->helper == NULL)
++        && nf_ct_protonum(ct) == IPPROTO_UDP) {
++        unsigned int ret;
++
++        pr_debug("SNAT: need full cone NAT\n");
++
++        /* Set ct helper */
++        ret = nf_nat_setup_info(ct, &mr->range[0], NF_NAT_MANIP_SRC);
++        if (ret == NF_ACCEPT) {
++            struct nf_conn_help *help = nfct_help(ct);
++            if (help == NULL)
++                help = nf_ct_helper_ext_add(ct, GFP_ATOMIC);
++            if (help != NULL) {
++                help->helper = &nf_conntrack_helper_snat;
++                pr_debug("SNAT: helper set\n");
++            }
++        }
++        return ret;
++    }
++
+ 	return nf_nat_setup_info(ct, &mr->range[0], NF_NAT_MANIP_SRC);
+ }
+ 
+@@ -208,6 +360,7 @@ int __init nf_nat_rule_init(void)
+ 
+ void nf_nat_rule_cleanup(void)
+ {
++    nf_conntrack_helper_unregister(&nf_conntrack_helper_snat);
+ 	xt_unregister_target(&ipt_dnat_reg);
+ 	xt_unregister_target(&ipt_snat_reg);
+ 	unregister_pernet_subsys(&nf_nat_rule_net_ops);

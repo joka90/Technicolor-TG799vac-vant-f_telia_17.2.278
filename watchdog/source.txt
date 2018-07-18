@@ -1,0 +1,4 @@
+Source: watchdog-5.13-10f6c916e3ebe076cb7bf3fdd7a80c0898d6d01a.tar.gz
+Source-Url: git://git.code.sf.net/p/watchdog/code
+Source-Version: 10f6c916e3ebe076cb7bf3fdd7a80c0898d6d01a
+Source-Proto: 

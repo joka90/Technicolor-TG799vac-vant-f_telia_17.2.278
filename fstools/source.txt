@@ -1,0 +1,4 @@
+Source: fstools-2016-01-10-96415afecef35766332067f4205ef3b2c7561d21.tar.gz
+Source-Url: http://git.openwrt.org/project/fstools.git
+Source-Version: 96415afecef35766332067f4205ef3b2c7561d21
+Source-Proto: 

@@ -1,0 +1,312 @@
+--- a/pppd/plugins/Makefile.linux
++++ b/pppd/plugins/Makefile.linux
+@@ -25,6 +25,10 @@ endif
+ ifeq (.depend,$(wildcard .depend))
+ include .depend
+ endif
++PLUGINS += connstate.so
++
++connstate.so: connstate.c
++	$(CC) -o $@ $(LDFLAGS) -lubus -lubox $(CFLAGS) $^
+ 
+ all:	$(PLUGINS)
+ 	for d in $(SUBDIRS); do $(MAKE) $(MFLAGS) -C $$d all; done
+--- /dev/null
++++ b/pppd/plugins/connstate.c
+@@ -0,0 +1,296 @@
++/*
++ * connstate.c - pppd plugin to update UBUS state of a PPP connection
++ */
++#include <unistd.h>
++#include <errno.h>
++#include <string.h>
++#include <sys/wait.h>
++#include "pppd.h"
++
++#include <libubus.h>
++#include <libubox/blobmsg.h>
++
++char pppd_version[] = VERSION;
++
++#define CONNSTATE_DISCONNECTED      0
++#define CONNSTATE_TRIGGER           1
++#define CONNSTATE_CONNECTING        2
++#define CONNSTATE_AUTHENTICATING    3
++#define CONNSTATE_NETWORKING        4
++#define CONNSTATE_CONNECTED         5
++#define CONNSTATE_DISCONNECTING     6
++
++static int connstate = -1;
++static struct blob_buf b,e;
++struct ubus_context *ctx = NULL;
++
++static char *connstate_name(int state)
++{
++    static char *connstate_names[] = {
++        [CONNSTATE_DISCONNECTED]   = "disconnected",
++        [CONNSTATE_TRIGGER]        = "trigger",
++        [CONNSTATE_CONNECTING]     = "connecting",
++        [CONNSTATE_AUTHENTICATING] = "authenticating",
++        [CONNSTATE_NETWORKING]     = "networking",
++        [CONNSTATE_CONNECTED]      = "connected",
++        [CONNSTATE_DISCONNECTING]  = "disconnecting",
++    };
++    char *name = NULL;
++
++    if (state >= 0 && state < sizeof(connstate_names)/sizeof(connstate_names[0]))
++        name = connstate_names[state];
++    if (name == NULL)
++        name = "???";
++
++    return name;
++}
++
++static char *exitstatus_name(int exitstatus)
++{
++    static char *exitstatus_names[] = {
++        [EXIT_OK]                   = "OK",
++        [EXIT_FATAL_ERROR]          = "FATAL_ERROR",
++        [EXIT_OPTION_ERROR]         = "OPTION_ERROR",
++        [EXIT_NOT_ROOT]             = "NOT_ROOT",
++        [EXIT_NO_KERNEL_SUPPORT]    = "NO_KERNEL_SUPPORT",
++        [EXIT_USER_REQUEST]         = "USER_REQUEST",
++        [EXIT_LOCK_FAILED]          = "LOCK_FAILED",
++        [EXIT_OPEN_FAILED]          = "OPEN_FAILED",
++        [EXIT_CONNECT_FAILED]       = "CONNECT_FAILED",
++        [EXIT_PTYCMD_FAILED]        = "PTYCMD_FAILED",
++        [EXIT_NEGOTIATION_FAILED]   = "NEGOTIATION_FAILED",
++        [EXIT_PEER_AUTH_FAILED]     = "PEER_AUTH_FAILED",
++        [EXIT_IDLE_TIMEOUT]         = "IDLE_TIMEOUT",
++        [EXIT_CONNECT_TIME]         = "CONNECT_TIME",
++        [EXIT_CALLBACK]             = "CALLBACK",
++        [EXIT_PEER_DEAD]            = "PEER_DEAD",
++        [EXIT_HANGUP]               = "HANGUP",
++        [EXIT_LOOPBACK]             = "LOOPBACK",
++        [EXIT_INIT_FAILED]          = "INIT_FAILED",
++        [EXIT_AUTH_TOPEER_FAILED]   = "AUTH_TOPEER_FAILED",
++#ifdef MAXOCTETS
++        [EXIT_TRAFFIC_LIMIT]        = "TRAFFIC_LIMIT",
++#endif
++        [EXIT_CNID_AUTH_FAILED]     = "CNID_AUTH_FAILED",
++    };
++    char *name = NULL;
++
++    if (exitstatus >= 0 && exitstatus < sizeof(exitstatus_names)/sizeof(exitstatus_names[0]))
++        name = exitstatus_names[exitstatus];
++    if (name == NULL)
++        name = "???";
++
++    return name;
++}
++
++static char *connstate_find_scriptenv(char *name)
++{
++    int i;
++    char *p;
++    size_t namelen = strlen(name);
++
++    if (script_env != 0) {
++    for (i = 0; (p = script_env[i]) != 0; ++i) {
++        if (strncmp(p, name, namelen) == 0 && p[namelen] == '=')
++        return p + namelen + 1;
++    }
++    }
++
++    return NULL;
++}
++
++static void connstate_update_ubus_error(char *exitstate)
++{
++    char *value;
++    char objpath[128];
++    uint32_t objid = 0;
++    pid_t pid;
++    struct ubus_request req;
++    void *cookie;
++    int mystatus;
++
++    /* ipparam is needed to identify the network.interface object */
++    if (ipparam == NULL || ipparam[0] == '\0') {
++       error ("Connstate: ipparam not configured");
++       return;
++    }
++
++    /* build error notificaton blob */
++    if (exitstate != NULL) {
++        blob_buf_init(&e, 0);
++        blobmsg_add_u32(&e, "action", 3);
++        cookie = blobmsg_open_array(&e, "error");
++        blobmsg_add_string(&e, NULL, exitstate);
++        blobmsg_close_array(&e,cookie);
++    }
++    switch ((pid = fork())) {
++    case -1:
++        fatal("Could not fork.");
++
++    case 0: /* child */
++            /* get network.interface.ipparam ubus object */
++            if (snprintf(objpath, sizeof(objpath), "network.interface.%s", ipparam) >= sizeof(objpath) ||
++                ubus_lookup_id(ctx, objpath, &objid) != 0)
++                error ("Connstate: failed to find ubus object %s", objpath);
++            else {
++                  /* notify protocol handler of network.interface.ipparam ubus object */
++                    if (ubus_invoke_async(ctx, objid, "notify_proto", e.head, &req) != 0)
++                        error ("Connstate: ubus notify_proto invoke failed on object %s", objpath);
++            }
++
++        ubus_free(ctx);
++        exit(0);
++        break;
++
++    default:
++        while (waitpid(pid, &mystatus, 0) < 0) {
++        if (errno == EINTR)
++            continue;
++
++        error ("Connstate: error waiting for pid %d", pid);
++        }
++        break;
++    }
++}
++
++static void connstate_update_ubus_state(char *connstate)
++{
++    char *value;
++    char objpath[128];
++    uint32_t objid = 0;
++    pid_t pid;
++    struct ubus_request req;
++    void *cookie;
++    int mystatus;
++
++    /* ipparam is needed to identify the network.interface object */
++    if (ipparam == NULL || ipparam[0] == '\0') {
++       error ("Connstate: ipparam not configured");
++       return;
++    }
++
++    /* build state blob */
++    if (connstate != NULL) {
++        blob_buf_init(&b, 0);
++        cookie = blobmsg_open_table(&b, "pppinfo");
++        blobmsg_add_string(&b, "pppstate", connstate);
++        value = connstate_find_scriptenv("MACREMOTE");
++        if (value != NULL && value[0] != '\0')
++            blobmsg_add_string(&b, "accesconcentrator", value);
++        value = connstate_find_scriptenv("PEERNAME");
++        if (value != NULL && value[0] != '\0')
++            blobmsg_add_string(&b, "peername", value);
++        value = connstate_find_scriptenv("AUTHPROTO");
++        if (value != NULL && value[0] != '\0')
++           blobmsg_add_string(&b, "auth", value);
++        blobmsg_close_table(&b, cookie);
++    }
++
++    switch ((pid = fork())) {
++    case -1:
++        fatal("Could not fork.");
++
++    case 0: /* child */
++        /* get network.interface.ipparam ubus object */
++        if (snprintf(objpath, sizeof(objpath), "network.interface.%s", ipparam) >= sizeof(objpath) ||
++                ubus_lookup_id(ctx, objpath, &objid) != 0)
++            error ("Connstate: failed to find ubus object %s", objpath);
++        else {
++            /* update network.interface.ipparam ubus object */
++            if (ubus_invoke_async(ctx, objid, "set_data", b.head, &req) != 0)
++                error ("Connstate: ubus set_data invoke failed on object %s", objpath);
++
++            /* send ubus network.interface event */
++            blobmsg_add_string(&b, "interface", ipparam);
++            if (ubus_send_event(ctx, "network.interface", b.head) != 0)
++                error ("Connstate: failed to send network.inteface event");
++        }
++
++        ubus_free(ctx);
++        exit(0);
++        break;
++
++    default:
++        while (waitpid(pid, &mystatus, 0) < 0) {
++        if (errno == EINTR)
++            continue;
++
++        error ("Connstate: error waiting for pid %d", pid);
++        }
++        break;
++    }
++}
++
++static void phasechange_handler(void *opaque, int newphase)
++{
++    int newstate;
++    char *strstate = NULL;
++    char *strexitstatus = NULL;
++
++    switch(newphase) {
++    case PHASE_DEAD:
++    case PHASE_INITIALIZE:
++    case PHASE_MASTER:
++    default:
++        newstate = CONNSTATE_DISCONNECTED;
++        break;
++    case PHASE_HOLDOFF:
++        newstate = CONNSTATE_DISCONNECTED;
++        strexitstatus = exitstatus_name(status);
++        notice("Connection error status changed to %s", strexitstatus);
++        connstate_update_ubus_error(strexitstatus);
++        break;
++    case PHASE_DORMANT:
++        newstate = (demand ? CONNSTATE_TRIGGER : CONNSTATE_DISCONNECTED);
++        break;
++    case PHASE_SERIALCONN:
++    case PHASE_ESTABLISH:
++        newstate = CONNSTATE_CONNECTING;
++        break;
++    case PHASE_AUTHENTICATE:
++        newstate = CONNSTATE_AUTHENTICATING;
++        break;
++    case PHASE_CALLBACK:
++    case PHASE_NETWORK:
++        newstate = CONNSTATE_NETWORKING;
++        break;
++    case PHASE_RUNNING:
++        newstate = CONNSTATE_CONNECTED;
++        break;
++    case PHASE_TERMINATE:
++    case PHASE_DISCONNECT:
++        newstate = CONNSTATE_DISCONNECTING;
++        break;
++    }
++    if (connstate == newstate)
++        return;
++
++    /* avoid spurious state transitions */
++    if (connstate == CONNSTATE_DISCONNECTING &&
++        (newstate != CONNSTATE_DISCONNECTED && newstate != CONNSTATE_TRIGGER))
++        return;
++
++    connstate = newstate;
++    strstate = connstate_name(connstate);
++    notice("Connection state changed to %s (phase %d)", strstate, newphase);
++
++    /* update ubus state of this interface */
++    connstate_update_ubus_state(strstate);
++}
++
++static void cleanup(void *opaque, int arg)
++{
++    ubus_free(ctx);
++}
++
++void plugin_init(void)
++{
++    ctx = ubus_connect(NULL);
++    if (ctx == NULL) {
++    error ("Connstate: failed to connect to ubus");
++    return;
++    }
++
++    add_notifier(&phasechange, phasechange_handler, 0);
++    add_notifier(&exitnotify, cleanup, 0);
++}

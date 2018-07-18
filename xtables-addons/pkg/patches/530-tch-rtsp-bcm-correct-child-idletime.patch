@@ -1,0 +1,24 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -426,6 +426,10 @@ help_out(struct sk_buff *skb, unsigned c
+ 				  IPPROTO_UDP, NULL, &be_loport);
+ 
+ 		rtp_exp->flags = 0;
++#if defined(CONFIG_BCM_KF_NETFILTER)
++		rtp_exp->flags |= NF_CT_EXPECT_DERIVED_TIMEOUT;
++		rtp_exp->derived_timeout = setup_timeout*HZ;
++#endif
+ #if defined(CONFIG_BCM_KF_NETFILTER) && (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
+ 		/* register the RTP port with ingress QoS classifier */
+ 		rtp_exp->flags |= NF_CT_EXPECT_DSTPORT_IQOS_DYNPRIO;
+@@ -448,6 +452,10 @@ help_out(struct sk_buff *skb, unsigned c
+ 					  IPPROTO_UDP, NULL, &be_hiport);
+ 
+ 			rtcp_exp->flags = 0;
++#if defined(CONFIG_BCM_KF_NETFILTER)
++                        rtcp_exp->flags |= NF_CT_EXPECT_DERIVED_TIMEOUT;
++                        rtcp_exp->derived_timeout = setup_timeout*HZ;
++#endif
+ #if defined(CONFIG_BCM_KF_NETFILTER) && (defined(CONFIG_BCM_INGQOS) || defined(CONFIG_BCM_INGQOS_MODULE))
+ 			/* register the RTCP port with ingress QoS classifier */
+ 			rtcp_exp->flags |= NF_CT_EXPECT_DSTPORT_IQOS_DYNPRIO;

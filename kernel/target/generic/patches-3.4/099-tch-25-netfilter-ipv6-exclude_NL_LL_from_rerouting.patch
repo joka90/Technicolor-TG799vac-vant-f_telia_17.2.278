@@ -1,0 +1,19 @@
+--- a/net/ipv6/netfilter/ip6table_mangle.c
++++ b/net/ipv6/netfilter/ip6table_mangle.c
+@@ -12,6 +12,8 @@
+ #include <linux/netfilter_ipv6/ip6_tables.h>
+ #include <linux/slab.h>
+ 
++#include <net/ipv6.h>
++
+ MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Netfilter Core Team <coreteam@netfilter.org>");
+ MODULE_DESCRIPTION("ip6tables mangle table");
+@@ -62,6 +64,7 @@ ip6t_mangle_out(struct sk_buff *skb, con
+ 			    dev_net(out)->ipv6.ip6table_mangle);
+ 
+ 	if (ret != NF_DROP && ret != NF_STOLEN &&
++	    !(ipv6_addr_type(&ipv6_hdr(skb)->daddr) & (IPV6_ADDR_LOOPBACK | IPV6_ADDR_LINKLOCAL)) &&
+ 	    (memcmp(&ipv6_hdr(skb)->saddr, &saddr, sizeof(saddr)) ||
+ 	     memcmp(&ipv6_hdr(skb)->daddr, &daddr, sizeof(daddr)) ||
+ 	     skb->mark != mark ||

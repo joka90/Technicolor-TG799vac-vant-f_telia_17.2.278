@@ -1,0 +1,160 @@
+--- a/include/linux/if_addr.h
++++ b/include/linux/if_addr.h
+@@ -18,6 +18,9 @@ struct ifaddrmsg {
+  * It makes no difference for normally configured broadcast interfaces,
+  * but for point-to-point IFA_ADDRESS is DESTINATION address,
+  * local address is supplied in IFA_LOCAL attribute.
++ *
++ * IFA_FLAGS is a u32 attribute that extends the u8 field ifa_flags.
++ * If present, the value from struct ifaddrmsg will be ignored.
+  */
+ enum {
+ 	IFA_UNSPEC,
+@@ -28,6 +31,7 @@ enum {
+ 	IFA_ANYCAST,
+ 	IFA_CACHEINFO,
+ 	IFA_MULTICAST,
++	IFA_FLAGS,
+ 	__IFA_MAX,
+ };
+ 
+--- a/include/net/addrconf.h
++++ b/include/net/addrconf.h
+@@ -83,7 +83,7 @@ extern int			ipv6_dev_get_saddr(struct n
+ 					       struct in6_addr *saddr);
+ extern int			ipv6_get_lladdr(struct net_device *dev,
+ 						struct in6_addr *addr,
+-						unsigned char banned_flags);
++						u32 banned_flags);
+ extern int 			ipv6_rcv_saddr_equal(const struct sock *sk,
+ 						    const struct sock *sk2);
+ extern void			addrconf_join_solict(struct net_device *dev,
+--- a/include/net/if_inet6.h
++++ b/include/net/if_inet6.h
+@@ -54,8 +54,8 @@ struct inet6_ifaddr {
+ 
+ 	int			state;
+ 
++	__u32			flags;
+ 	__u8			probes;
+-	__u8			flags;
+ 
+ 	__u16			scope;
+ 
+--- a/net/ipv6/addrconf.c
++++ b/net/ipv6/addrconf.c
+@@ -1288,7 +1288,7 @@ try_nextdev:
+ EXPORT_SYMBOL(ipv6_dev_get_saddr);
+ 
+ int ipv6_get_lladdr(struct net_device *dev, struct in6_addr *addr,
+-		    unsigned char banned_flags)
++		    u32 banned_flags)
+ {
+ 	struct inet6_dev *idev;
+ 	int err = -EADDRNOTAVAIL;
+@@ -2019,7 +2019,7 @@ ok:
+ 		}
+ 
+ 		if (ifp) {
+-			int flags;
++			u32 flags;
+ 			unsigned long now;
+ #ifdef CONFIG_IPV6_PRIVACY
+ 			struct inet6_ifaddr *ift;
+@@ -2230,7 +2230,7 @@ err_exit:
+  *	Manual configuration of address on an interface
+  */
+ static int inet6_addr_add(struct net *net, int ifindex, const struct in6_addr *pfx,
+-			  unsigned int plen, __u8 ifa_flags, __u32 prefered_lft,
++			  unsigned int plen, __u32 ifa_flags, __u32 prefered_lft,
+ 			  __u32 valid_lft)
+ {
+ 	struct inet6_ifaddr *ifp;
+@@ -3296,7 +3296,7 @@ static int if6_seq_show(struct seq_file
+ 		   ifp->idev->dev->ifindex,
+ 		   ifp->prefix_len,
+ 		   ifp->scope,
+-		   ifp->flags,
++		   (u8) ifp->flags,
+ 		   ifp->idev->dev->name);
+ 	return 0;
+ }
+@@ -3514,6 +3514,7 @@ static const struct nla_policy ifa_ipv6_
+ 	[IFA_ADDRESS]		= { .len = sizeof(struct in6_addr) },
+ 	[IFA_LOCAL]		= { .len = sizeof(struct in6_addr) },
+ 	[IFA_CACHEINFO]		= { .len = sizeof(struct ifa_cacheinfo) },
++	[IFA_FLAGS]		= { .len = sizeof(u32) },
+ };
+ 
+ static int
+@@ -3537,7 +3538,7 @@ inet6_rtm_deladdr(struct sk_buff *skb, s
+ 	return inet6_addr_del(net, ifm->ifa_index, pfx, ifm->ifa_prefixlen);
+ }
+ 
+-static int inet6_addr_modify(struct inet6_ifaddr *ifp, u8 ifa_flags,
++static int inet6_addr_modify(struct inet6_ifaddr *ifp, u32 ifa_flags,
+ 			     u32 prefered_lft, u32 valid_lft)
+ {
+ 	u32 flags;
+@@ -3612,7 +3613,7 @@ inet6_rtm_newaddr(struct sk_buff *skb, s
+ 	struct inet6_ifaddr *ifa;
+ 	struct net_device *dev;
+ 	u32 valid_lft = INFINITY_LIFE_TIME, preferred_lft = INFINITY_LIFE_TIME;
+-	u8 ifa_flags;
++	u32 ifa_flags;
+ 	int err;
+ 
+ 	err = nlmsg_parse(nlh, sizeof(*ifm), tb, IFA_MAX, ifa_ipv6_policy);
+@@ -3639,8 +3640,10 @@ inet6_rtm_newaddr(struct sk_buff *skb, s
+ 	if (dev == NULL)
+ 		return -ENODEV;
+ 
++	ifa_flags = tb[IFA_FLAGS] ? nla_get_u32(tb[IFA_FLAGS]) : ifm->ifa_flags;
++
+ 	/* We ignore other flags so far. */
+-	ifa_flags = ifm->ifa_flags & (IFA_F_NODAD | IFA_F_HOMEADDRESS | IFA_F_NOPREFIXROUTE);
++	ifa_flags &= IFA_F_NODAD | IFA_F_HOMEADDRESS | IFA_F_NOPREFIXROUTE;
+ 
+ 	ifa = ipv6_get_ifaddr(net, pfx, dev, 1);
+ 	if (ifa == NULL) {
+@@ -3664,7 +3667,7 @@ inet6_rtm_newaddr(struct sk_buff *skb, s
+ 	return err;
+ }
+ 
+-static void put_ifaddrmsg(struct nlmsghdr *nlh, u8 prefixlen, u8 flags,
++static void put_ifaddrmsg(struct nlmsghdr *nlh, u8 prefixlen, u32 flags,
+ 			  u8 scope, int ifindex)
+ {
+ 	struct ifaddrmsg *ifm;
+@@ -3706,7 +3709,8 @@ static inline int inet6_ifaddr_msgsize(v
+ {
+ 	return NLMSG_ALIGN(sizeof(struct ifaddrmsg))
+ 	       + nla_total_size(16) /* IFA_ADDRESS */
+-	       + nla_total_size(sizeof(struct ifa_cacheinfo));
++	       + nla_total_size(sizeof(struct ifa_cacheinfo))
++	       + nla_total_size(4)  /* IFA_FLAGS */;
+ }
+ 
+ static int inet6_fill_ifaddr(struct sk_buff *skb, struct inet6_ifaddr *ifa,
+@@ -3744,12 +3748,17 @@ static int inet6_fill_ifaddr(struct sk_b
+ 	}
+ 
+ 	if (nla_put(skb, IFA_ADDRESS, 16, &ifa->addr) < 0 ||
+-	    put_cacheinfo(skb, ifa->cstamp, ifa->tstamp, preferred, valid) < 0) {
+-		nlmsg_cancel(skb, nlh);
+-		return -EMSGSIZE;
+-	}
++	    put_cacheinfo(skb, ifa->cstamp, ifa->tstamp, preferred, valid) < 0)
++		goto error;
++
++	if (nla_put_u32(skb, IFA_FLAGS, ifa->flags) < 0)
++		goto error;
+ 
+ 	return nlmsg_end(skb, nlh);
++
++error:
++	nlmsg_cancel(skb,nlh);
++	return -EMSGSIZE;
+ }
+ 
+ static int inet6_fill_ifmcaddr(struct sk_buff *skb, struct ifmcaddr6 *ifmca,

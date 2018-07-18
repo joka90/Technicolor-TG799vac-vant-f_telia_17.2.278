@@ -1,0 +1,45 @@
+--- a/net/ipv6/netfilter.c
++++ b/net/ipv6/netfilter.c
+@@ -28,7 +28,7 @@ int ip6_route_me_harder(struct sk_buff *
+ 		IP6_INC_STATS(net, ip6_dst_idev(dst), IPSTATS_MIB_OUTNOROUTES);
+ 		LIMIT_NETDEBUG(KERN_DEBUG "ip6_route_me_harder: No more route.\n");
+ 		dst_release(dst);
+-		return -EINVAL;
++		return dst->error;
+ 	}
+ 
+ 	/* Drop old route. */
+@@ -42,7 +42,7 @@ int ip6_route_me_harder(struct sk_buff *
+ 		skb_dst_set(skb, NULL);
+ 		dst = xfrm_lookup(net, dst, flowi6_to_flowi(&fl6), skb->sk, 0);
+ 		if (IS_ERR(dst))
+-			return -1;
++			return PTR_ERR(dst);
+ 		skb_dst_set(skb, dst);
+ 	}
+ #endif
+--- a/net/ipv6/netfilter/ip6table_mangle.c
++++ b/net/ipv6/netfilter/ip6table_mangle.c
+@@ -37,6 +37,7 @@ ip6t_mangle_out(struct sk_buff *skb, con
+ 	struct in6_addr saddr, daddr;
+ 	u_int8_t hop_limit;
+ 	u_int32_t flowlabel, mark;
++	int err;
+ 
+ #if 0
+ 	/* root is playing with raw sockets. */
+@@ -65,9 +66,11 @@ ip6t_mangle_out(struct sk_buff *skb, con
+ 	     memcmp(&ipv6_hdr(skb)->daddr, &daddr, sizeof(daddr)) ||
+ 	     skb->mark != mark ||
+ 	     ipv6_hdr(skb)->hop_limit != hop_limit ||
+-	     flowlabel != *((u_int32_t *)ipv6_hdr(skb))))
+-		return ip6_route_me_harder(skb) == 0 ? ret : NF_DROP;
+-
++	     flowlabel != *((u_int32_t *)ipv6_hdr(skb)))) {
++	        err = ip6_route_me_harder(skb);
++	        if (err < 0)
++	            ret = NF_DROP_ERR(err);
++	}
+ 	return ret;
+ }
+ 

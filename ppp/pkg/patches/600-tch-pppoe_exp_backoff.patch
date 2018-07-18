@@ -1,0 +1,269 @@
+--- a/pppd/plugins/rp-pppoe/discovery.c
++++ b/pppd/plugins/rp-pppoe/discovery.c
+@@ -14,12 +14,14 @@ static char const RCSID[] =
+ #define _GNU_SOURCE 1
+ #include "pppoe.h"
+ #include "pppd/pppd.h"
++#include "pppd/magic.h"
+ #include "pppd/fsm.h"
+ #include "pppd/lcp.h"
+ 
+ #include <string.h>
+ #include <stdlib.h>
+ #include <errno.h>
++#include <limits.h>
+ 
+ #ifdef HAVE_SYS_TIME_H
+ #include <sys/time.h>
+@@ -65,6 +67,46 @@ static int time_left(struct timeval *dif
+ }
+ 
+ /**********************************************************************
++*%FUNCTION: randomize_time
++*%ARGUMENTS:
++* time -- time in seconds that will be randomized
++* timeval -- user supplied pointer to the randomized timeval struct
++*%RETURNS:
++* Nothing
++*%DESCRIPTION:
++* Calculate a random time value in the interval [time-1, time+1[.
++* If the specified time is 0 the,the  interval [0,2[ will be used.
++* Since time is an unsigned long and timeval.tv_sec a signed long,
++* values between INT_MAX and UINT_MAX will be set to INT_MAX before
++* randomizing.
++***********************************************************************/
++static void
++randomize_time(unsigned long time, struct timeval *rnd_timeval)
++{
++    unsigned long rnd;
++
++    rnd = ((unsigned long) magic()) % 2000000;
++
++    if (time == 0) {
++	time++;
++    }
++
++/* If the time is too large to fit in a timeval, use max value      */
++/* that can be represented                                          */
++    rnd_timeval->tv_sec = (time > INT_MAX) ? INT_MAX : (signed long) time;
++    if (rnd < 1000000) {
++	rnd_timeval->tv_sec--;
++	rnd_timeval->tv_usec = rnd;
++    }
++    else {
++	rnd_timeval->tv_usec = rnd - 1000000;
++    }
++/* Respect a minimal time interval, give the pppoeserver time enough */
++/* to answer. A minimal time interval of 1 second looks fair         */
++    rnd_timeval->tv_sec = (rnd_timeval->tv_sec < 1) ? 1 : rnd_timeval->tv_sec;
++}
++
++/**********************************************************************
+ *%FUNCTION: parseForHostUniq
+ *%ARGUMENTS:
+ * type -- tag type
+@@ -358,7 +400,9 @@ waitForPADO(PPPoEConnection *conn, int t
+ 	error("gettimeofday (waitForPADO): %m");
+ 	return;
+     }
+-    expire_at.tv_sec += timeout;
++
++    randomize_time(timeout, &tv);
++    timeradd(&expire_at, &tv, &expire_at);
+ 
+     do {
+ 	if (BPF_BUFFER_IS_EMPTY) {
+@@ -538,7 +582,8 @@ waitForPADS(PPPoEConnection *conn, int t
+ 	error("gettimeofday (waitForPADS): %m");
+ 	return;
+     }
+-    expire_at.tv_sec += timeout;
++    randomize_time(timeout, &tv);
++    timeradd(&expire_at, &tv, &expire_at);
+ 
+     conn->error = 0;
+     do {
+@@ -619,40 +664,33 @@ discovery(PPPoEConnection *conn)
+ {
+     int padiAttempts = 0;
+     int padrAttempts = 0;
+-    int timeout = conn->discoveryTimeout;
++    int timeout = conn->discoveryMin;
+ 
+     do {
+-	padiAttempts++;
+-	if (padiAttempts > MAX_PADI_ATTEMPTS) {
+-	    warn("Timeout waiting for PADO packets");
+-	    close(conn->discoverySocket);
+-	    conn->discoverySocket = -1;
+-	    return;
+-	}
++	timeout = conn->discoveryMin * (1<< (padiAttempts));
++	if ( timeout > conn->discoveryMax)
++		timeout = conn->discoveryMax;
++	else
++		padiAttempts++;
+ 	sendPADI(conn);
+ 	conn->discoveryState = STATE_SENT_PADI;
+ 	waitForPADO(conn, timeout);
+-
+-#if 0
+-	timeout *= 2;
+-#endif
+     } while (conn->discoveryState == STATE_SENT_PADI);
+ 
+-    timeout = conn->discoveryTimeout;
++    timeout = conn->discoveryMin;
+     do {
+-	padrAttempts++;
+-	if (padrAttempts > MAX_PADI_ATTEMPTS) {
++	timeout = conn->discoveryMin * (1<< (padrAttempts));
++	if ( timeout > conn->discoveryMax)
++        {
+ 	    warn("Timeout waiting for PADS packets");
+ 	    close(conn->discoverySocket);
+ 	    conn->discoverySocket = -1;
+ 	    return;
+ 	}
++	padrAttempts++;
+ 	sendPADR(conn);
+ 	conn->discoveryState = STATE_SENT_PADR;
+ 	waitForPADS(conn, timeout);
+-#if 0
+-	timeout *= 2;
+-#endif
+     } while (conn->discoveryState == STATE_SENT_PADR);
+ 
+     if (!conn->seenMaxPayload) {
+--- a/pppd/plugins/rp-pppoe/plugin.c
++++ b/pppd/plugins/rp-pppoe/plugin.c
+@@ -45,6 +45,7 @@ static char const RCSID[] =
+ #include <errno.h>
+ #include <unistd.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <signal.h>
+ #include <net/ethernet.h>
+ #include <net/if_arp.h>
+@@ -56,6 +57,8 @@ static char const RCSID[] =
+ #endif
+ 
+ #define _PATH_ETHOPT         _ROOT_PATH "/etc/ppp/options."
++#define BACKOFF_TMR_MIN 1
++#define BACKOFF_TMR_MAX INT_MAX
+ 
+ char pppd_version[] = VERSION;
+ 
+@@ -66,7 +69,11 @@ static int printACNames = 0;
+ static char *pppoe_reqd_mac = NULL;
+ unsigned char pppoe_reqd_mac_addr[6];
+ static char *host_uniq = NULL;
++static int pppoe_backoff_min = PPPOE_BACKOFF_MIN;
++static int pppoe_backoff_max = PPPOE_BACKOFF_MAX;
++static char *pppoe_backoff_string = NULL;
+ 
++static int PPPoEBackOffHook(char **argv);
+ static int PPPoEDevnameHook(char *cmd, char **argv, int doit);
+ static option_t Options[] = {
+     { "device name", o_wild, (void *) &PPPoEDevnameHook,
+@@ -85,12 +92,68 @@ static option_t Options[] = {
+       "Only connect to specified MAC address" },
+     { "host-uniq", o_string, &host_uniq,
+       "Specify custom Host-Uniq" },
++    { "pppoe_backoff", o_special, (void *)&PPPoEBackOffHook,
++      "Set the minimum and maximum retransmission interval",
++      OPT_PRIO | OPT_A2STRVAL, &pppoe_backoff_string },
+     { NULL }
+ };
+ int (*OldDevnameHook)(char *cmd, char **argv, int doit) = NULL;
+ static PPPoEConnection *conn = NULL;
+ 
+ /**********************************************************************
++ * %FUNCTION: PPPoEBackOffHook
++ * %ARGUMENTS:
++ * cmd -- the command
++ * argv -- argument vector
++ * doit -- if non-zero, set backoff values.  Otherwise, just check if possible
++ * %RETURNS:
++ * 1 if argument parsing is successfull
++ * 0 if argument parsing is unsuccessfull
++ * %DESCRIPTION:
++ * Checks if the specified minimum and maximum retransmission interval is
++ * correctly configured
++ ***********************************************************************/
++static int
++PPPoEBackOffHook(char **argv)
++{
++    int min, max;
++    char *str, *endp;
++
++    str = *argv;
++    min = max = strtol(str, &endp, 0);
++    if (endp != str && *endp == ',') {
++	str = endp + 1;
++	max = strtol(str, &endp, 0);
++    }
++    if (*endp != 0 || endp == str) {
++	option_error("invalid parameter '%s' for pppoe backoff option", *argv);
++	return 0;
++    }
++    if ((min < BACKOFF_TMR_MIN) || (min > BACKOFF_TMR_MAX) ||
++       (max < BACKOFF_TMR_MIN) || (max > BACKOFF_TMR_MAX) ) {
++	option_error("pppoe backoff timer values must be %d .. %d",
++	     BACKOFF_TMR_MIN, BACKOFF_TMR_MAX);
++	return 0;
++    }
++    if (max < min) {
++	option_error("pppoe backoff max timer should be >= min timer");
++	return 0;
++    }
++    pppoe_backoff_min = min;
++    pppoe_backoff_max = max;
++
++    /* keep configured backoff_string for printing */
++    pppoe_backoff_string = realloc(pppoe_backoff_string, strlen(*argv));
++    if (pppoe_backoff_string != 0) {
++	strcpy(pppoe_backoff_string, *argv);
++    }
++    else
++	return 0;
++
++    return 1;
++}
++
++/**********************************************************************
+  * %FUNCTION: PPPOEInitDevice
+  * %ARGUMENTS:
+  * None
+@@ -111,7 +174,8 @@ PPPOEInitDevice(void)
+     conn->discoverySocket = -1;
+     conn->sessionSocket = -1;
+     conn->printACNames = printACNames;
+-    conn->discoveryTimeout = PADI_TIMEOUT;
++    conn->discoveryMin = pppoe_backoff_min;
++    conn->discoveryMax = (pppoe_backoff_max > pppoe_backoff_min) ? pppoe_backoff_max : pppoe_backoff_min;
+     return 1;
+ }
+ 
+--- a/pppd/plugins/rp-pppoe/pppoe.h
++++ b/pppd/plugins/rp-pppoe/pppoe.h
+@@ -137,6 +137,10 @@ extern UINT16_t Eth_PPPOE_Session;
+ /* Initial timeout for PADO/PADS */
+ #define PADI_TIMEOUT 5
+ 
++/* PPPoE exponential backoff algorithm */
++#define PPPOE_BACKOFF_MIN 1
++#define PPPOE_BACKOFF_MAX 128
++
+ /* States for scanning PPP frames */
+ #define STATE_WAITFOR_FRAME_ADDR 0
+ #define STATE_DROP_PROTO         1
+@@ -228,6 +232,8 @@ typedef struct PPPoEConnectionStruct {
+     int error;			/* Error packet received */
+     int debug;			/* Set to log packets sent and received */
+     int discoveryTimeout;       /* Timeout for discovery packets */
++    int discoveryMin;           /* Mininum retransmission timeout (backoff algorithm) */
++    int discoveryMax;           /* Maximum retransmission timeout (backoff algorithm) */
+     int seenMaxPayload;
+     int mtu;			/* Stored MTU */
+     int mru;			/* Stored MRU */

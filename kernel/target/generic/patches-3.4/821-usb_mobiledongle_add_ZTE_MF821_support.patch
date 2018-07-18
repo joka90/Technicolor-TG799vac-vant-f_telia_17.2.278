@@ -1,0 +1,29 @@
+--- a/drivers/net/usb/qmi_wwan.c
++++ b/drivers/net/usb/qmi_wwan.c
+@@ -436,6 +436,15 @@ static const struct usb_device_id produc
+ 		.bInterfaceProtocol = 0xff,
+ 		.driver_info        = (unsigned long)&qmi_wwan_force_int4,
+ 	},
++	{	/* ZTE MF821 */
++		.match_flags	    = USB_DEVICE_ID_MATCH_DEVICE | USB_DEVICE_ID_MATCH_INT_INFO,
++		.idVendor           = 0x19d2,
++		.idProduct          = 0x0257,
++		.bInterfaceClass    = 0xff,
++		.bInterfaceSubClass = 0xff,
++		.bInterfaceProtocol = 0xff,
++		.driver_info        = (unsigned long)&qmi_wwan_force_int3,
++	},
+ 	{	/* ZTE (Vodafone) K3520-Z */
+ 		.match_flags	    = USB_DEVICE_ID_MATCH_DEVICE | USB_DEVICE_ID_MATCH_INT_INFO,
+ 		.idVendor           = 0x19d2,
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -1236,6 +1236,8 @@ static const struct usb_device_id option
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0165, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0167, 0xff, 0xff, 0xff),
+ 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0257, 0xff, 0xff, 0xff),
++	  .driver_info = (kernel_ulong_t)&net_intf3_blacklist },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0326, 0xff, 0xff, 0xff),
+ 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+ #if defined(CONFIG_BCM_KF_ANDROID) && defined(CONFIG_BCM_ANDROID)

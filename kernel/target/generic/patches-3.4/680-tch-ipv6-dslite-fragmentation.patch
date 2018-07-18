@@ -1,0 +1,64 @@
+--- a/net/ipv4/ip_output.c
++++ b/net/ipv4/ip_output.c
+@@ -249,7 +249,11 @@ static int ip_finish_output(struct sk_bu
+ 		return dst_output(skb);
+ 	}
+ #endif
+-	if (skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
++	/*
++	 * Do not fragment the packets going to 4in6 tunnel:
++	 * RFC2473 sec 7.2: fragmentation should happen in tunnel
++	 */
++	if (skb_dst(skb)->dev->type != ARPHRD_TUNNEL6 && skb->len > ip_skb_dst_mtu(skb) && !skb_is_gso(skb))
+ 		return ip_fragment(skb, ip_finish_output2);
+ 	else
+ 		return ip_finish_output2(skb);
+--- a/net/ipv6/ip6_tunnel.c
++++ b/net/ipv6/ip6_tunnel.c
+@@ -953,6 +953,7 @@ static int ip6_tnl_xmit2(struct sk_buff
+ 	u8 proto;
+ 	int err = -1;
+ 	int pkt_len;
++	u8 needFrag = 0;
+ 
+ 	if (!fl6->flowi6_mark)
+ 		dst = ip6_tnl_dst_check(t);
+@@ -990,9 +991,20 @@ static int ip6_tnl_xmit2(struct sk_buff
+ 	if (skb_dst(skb))
+ 		skb_dst(skb)->ops->update_pmtu(skb_dst(skb), mtu);
+ 	if (skb->len > mtu) {
+-		*pmtu = mtu;
+-		err = -EMSGSIZE;
+-		goto tx_err_dst_release;
++		/*
++		 * Fragment IPv6 packet for tunneled IPv4 packets if DF is not set
++		 * RFC2473 sec 7.2: fragmentation should happen in tunnel
++		 */
++		if (fl6->flowi6_proto == IPPROTO_IPIP && 
++		    (!(ip_hdr(skb)->frag_off & htons(IP_DF)))) {
++			needFrag = 1;
++		}
++
++		if (!needFrag) {
++			*pmtu = mtu;
++			err = -EMSGSIZE;
++			goto tx_err_dst_release;
++		}
+ 	}
+ 
+ 	/*
+@@ -1038,7 +1050,13 @@ static int ip6_tnl_xmit2(struct sk_buff
+ 	ipv6h->daddr = fl6->daddr;
+ 	nf_reset(skb);
+ 	pkt_len = skb->len;
+-	err = ip6_local_out(skb);
++	if (needFrag && !skb_is_gso(skb)) {
++		skb->local_df = 1;
++		ip6_fragment(skb, ip6_local_out);
++	}
++	else {
++		err = ip6_local_out(skb);
++	}
+ 
+ 	if (net_xmit_eval(err) == 0) {
+ 		struct pcpu_tstats *tstats = this_cpu_ptr(t->dev->tstats);

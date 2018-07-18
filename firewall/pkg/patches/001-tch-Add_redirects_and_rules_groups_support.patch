@@ -1,0 +1,406 @@
+From 4b3fd278728f36308d123f029c5d536bc2c67341 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jean-Fran=C3=A7ois=20Remy?=
+ <jean-francois.remy@technicolor.com>
+Date: Mon, 21 Oct 2013 21:52:35 +0200
+Subject: [PATCH] Add redirects and rules group support.
+This allows to have separate groups of rules (identified by their uci type)
+that will be loaded as rules or redirects. That way, it's possible to
+maintain separate groups and configure them through a 3rd party utility
+without having to parse all the other rules/redirects to identify
+whether they should be updated or not
+
+---
+ CMakeLists.txt    |  2 +-
+ main.c            |  4 ++++
+ options.h         | 18 ++++++++++++++
+ redirects.c       | 12 ++++++++--
+ redirects.h       |  1 +
+ redirectsgroups.c | 71 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ redirectsgroups.h | 32 +++++++++++++++++++++++++
+ rules.c           | 13 +++++++---
+ rules.h           |  1 +
+ rulesgroups.c     | 68 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ rulesgroups.h     | 32 +++++++++++++++++++++++++
+ 11 files changed, 248 insertions(+), 6 deletions(-)
+ create mode 100644 redirectsgroups.c
+ create mode 100644 redirectsgroups.h
+ create mode 100644 rulesgroups.c
+ create mode 100644 rulesgroups.h
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -26,7 +26,7 @@ ENDIF()
+ FIND_PATH(uci_include_dir uci.h)
+ INCLUDE_DIRECTORIES(${uci_include_dir})
+ 
+-ADD_EXECUTABLE(firewall3 main.c options.c defaults.c zones.c forwards.c rules.c redirects.c snats.c utils.c ubus.c ipsets.c includes.c iptables.c)
++ADD_EXECUTABLE(firewall3 main.c options.c defaults.c zones.c forwards.c rules.c rulesgroups.c redirects.c redirectsgroups.c snats.c utils.c ubus.c ipsets.c includes.c iptables.c)
+ TARGET_LINK_LIBRARIES(firewall3 uci ubox ubus xtables m dl ${iptc_libs} ${ext_libs})
+ 
+ SET(CMAKE_INSTALL_PREFIX /usr)
+--- a/main.c
++++ b/main.c
+@@ -23,7 +23,9 @@
+ #include "defaults.h"
+ #include "zones.h"
+ #include "rules.h"
++#include "rulesgroups.h"
+ #include "redirects.h"
++#include "redirectsgroups.h"
+ #include "snats.h"
+ #include "forwards.h"
+ #include "ipsets.h"
+@@ -104,7 +106,9 @@ build_state(bool runtime)
+ 	fw3_load_ipsets(state, p);
+ 	fw3_load_zones(state, p);
+ 	fw3_load_rules(state, p, b.head);
++	fw3_load_rulesgroups(state, p, b.head);
+ 	fw3_load_redirects(state, p);
++	fw3_load_redirectsgroups(state, p);
+ 	fw3_load_snats(state, p, b.head);
+ 	fw3_load_forwards(state, p);
+ 	fw3_load_includes(state, p);
+--- a/options.h
++++ b/options.h
+@@ -360,6 +360,15 @@ struct fw3_rule
+ 	const char *extra;
+ };
+ 
++struct fw3_rulesgroup
++{
++	struct list_head list;
++
++	bool enabled;
++	const char *name;
++	const char *type;
++};
++
+ struct fw3_redirect
+ {
+ 	struct list_head list;
+@@ -437,6 +446,15 @@ struct fw3_snat
+ 	const char *extra;
+ };
+ 
++struct fw3_redirectsgroup
++{
++	struct list_head list;
++
++	bool enabled;
++	const char *name;
++	const char *type;
++};
++
+ struct fw3_forward
+ {
+ 	struct list_head list;
+--- a/redirects.c
++++ b/redirects.c
+@@ -178,19 +178,27 @@ check_local(struct uci_element *e, struc
+ void
+ fw3_load_redirects(struct fw3_state *state, struct uci_package *p)
+ {
++	fw3_load_redirects_ext(state, p, "redirect", 1);
++}
++
++void
++fw3_load_redirects_ext(struct fw3_state *state, struct uci_package *p, const char *match_type, int create_list)
++{
+ 	struct uci_section *s;
+ 	struct uci_element *e;
+ 	struct fw3_redirect *redir;
+ 
+ 	bool valid;
+ 
+-	INIT_LIST_HEAD(&state->redirects);
++	if(create_list > 0) {
++		INIT_LIST_HEAD(&state->redirects);
++	}
+ 
+ 	uci_foreach_element(&p->sections, e)
+ 	{
+ 		s = uci_to_section(e);
+ 
+-		if (strcmp(s->type, "redirect"))
++		if (strcmp(s->type, match_type))
+ 			continue;
+ 
+ 		redir = calloc(1, sizeof(*redir));
+--- a/redirects.h
++++ b/redirects.h
+@@ -28,6 +28,7 @@
+ extern const struct fw3_option fw3_redirect_opts[];
+ 
+ void fw3_load_redirects(struct fw3_state *state, struct uci_package *p);
++void fw3_load_redirects_ext(struct fw3_state *state, struct uci_package *p, const char *match_type, int create_list);
+ void fw3_print_redirects(struct fw3_ipt_handle *handle,
+                          struct fw3_state *state);
+ 
+--- /dev/null
++++ b/redirectsgroups.c
+@@ -0,0 +1,71 @@
++/*
++ * firewall3 - 3rd OpenWrt UCI firewall implementation
++ *
++ *   Copyright (C) 2013 Jean-François Remy <jean-francois.remy@technicolor.com>
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#include "redirectsgroups.h"
++
++const struct fw3_option fw3_redirectsgroup_opts[] = {
++	FW3_OPT("enabled",             bool,      redirectsgroup,     enabled),
++
++	FW3_OPT("name",                string,    redirectsgroup,     name),
++	FW3_OPT("type",                string,    redirectsgroup,     type),
++
++	{ }
++};
++
++void fw3_load_redirectsgroups(struct fw3_state *state, struct uci_package *p) {
++	struct uci_section *s;
++	struct uci_element *e;
++	struct fw3_redirectsgroup *redirectsgroup;
++
++	uci_foreach_element(&p->sections, e)
++	{
++		s = uci_to_section(e);
++
++		if (strcmp(s->type, "redirectsgroup"))
++			continue;
++
++		redirectsgroup = malloc(sizeof(*redirectsgroup));
++
++		if (!redirectsgroup)
++			continue;
++
++		memset(redirectsgroup, 0, sizeof(*redirectsgroup));
++
++		redirectsgroup->enabled = true;
++
++		fw3_parse_options(redirectsgroup, fw3_redirectsgroup_opts, s);
++
++		if (!redirectsgroup->enabled)
++		{
++			fw3_free_redirectsgroup(redirectsgroup);
++			continue;
++		}
++
++		if (!redirectsgroup->type || strlen(redirectsgroup->type) == 0)
++		{
++			warn_elem(e, "must have a non-empty type element");
++			fw3_free_redirectsgroup(redirectsgroup);
++			continue;
++		}
++		fw3_load_redirects_ext(state, p, redirectsgroup->type, 0);
++		fw3_free_redirectsgroup(redirectsgroup);
++	}
++
++}
++
++
+--- /dev/null
++++ b/redirectsgroups.h
+@@ -0,0 +1,32 @@
++/*
++ * firewall3 - 3rd OpenWrt UCI firewall implementation
++ *
++ *   Copyright (C) 2013 Jean-François Remy <jean-francois.remy@technicolor.com>
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef REDIRECTSGROUPS_H_
++#define REDIRECTSGROUPS_H_
++
++#include "options.h"
++#include "redirects.h"
++
++extern const struct fw3_option fw3_redirectsgroup_opts[];
++
++void fw3_load_redirectsgroups(struct fw3_state *state, struct uci_package *p);
++
++#define fw3_free_redirectsgroup(redirectsgroup) \
++	fw3_free_object(redirectsgroup, fw3_redirectsgroup_opts)
++
++#endif /* REDIRECTSGROUPS_H_ */
+--- a/rules.c
++++ b/rules.c
+@@ -100,13 +100,21 @@ void
+ fw3_load_rules(struct fw3_state *state, struct uci_package *p,
+ 		struct blob_attr *a)
+ {
++	fw3_load_rules_ext(state, p, a, "rule", 1);
++}
++
++void
++fw3_load_rules_ext(struct fw3_state *state, struct uci_package *p,
++		struct blob_attr *a, const char *match_type, int create_list)
++{
+ 	struct uci_section *s;
+ 	struct uci_element *e;
+ 	struct fw3_rule *rule, *n;
+ 	struct blob_attr *entry, *opt;
+ 	unsigned rem, orem;
+ 
+-	INIT_LIST_HEAD(&state->rules);
++	if (create_list > 0)
++		INIT_LIST_HEAD(&state->rules);
+ 
+ 	blob_for_each_attr(entry, a, rem) {
+ 		const char *type = NULL;
+@@ -117,7 +125,7 @@ fw3_load_rules(struct fw3_state *state,
+ 			else if (!strcmp(blobmsg_name(opt), "name"))
+ 				name = blobmsg_get_string(opt);
+ 
+-		if (!type || strcmp(type, "rule"))
++		if (!type || strcmp(type, match_type))
+ 			continue;
+ 
+ 		if (!(rule = alloc_rule(state)))
+@@ -135,7 +143,7 @@ fw3_load_rules(struct fw3_state *state,
+ 	{
+ 		s = uci_to_section(e);
+ 
+-		if (strcmp(s->type, "rule"))
++		if (strcmp(s->type, match_type))
+ 			continue;
+ 
+ 		if (!(rule = alloc_rule(state)))
+--- a/rules.h
++++ b/rules.h
+@@ -28,6 +28,7 @@
+ extern const struct fw3_option fw3_rule_opts[];
+ 
+ void fw3_load_rules(struct fw3_state *state, struct uci_package *p, struct blob_attr *a);
++void fw3_load_rules_ext(struct fw3_state *state, struct uci_package *p, struct blob_attr *a, const char *match_type, int create_list);
+ void fw3_print_rules(struct fw3_ipt_handle *handle, struct fw3_state *state);
+ 
+ static inline void fw3_free_rule(struct fw3_rule *rule)
+--- /dev/null
++++ b/rulesgroups.c
+@@ -0,0 +1,68 @@
++/*
++ * firewall3 - 3rd OpenWrt UCI firewall implementation
++ *
++ *   Copyright (C) 2013 Jean-François Remy <jean-francois.remy@technicolor.com>
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++#include "rulesgroups.h"
++
++const struct fw3_option fw3_rulesgroup_opts[] = {
++	FW3_OPT("enabled",             bool,      rulesgroup,     enabled),
++
++	FW3_OPT("name",                string,    rulesgroup,     name),
++	FW3_OPT("type",                string,    rulesgroup,     type),
++
++	{ }
++};
++
++void fw3_load_rulesgroups(struct fw3_state *state, struct uci_package *p, struct blob_attr *a) {
++	struct uci_section *s;
++	struct uci_element *e;
++	struct fw3_rulesgroup *rulesgroup;
++
++	uci_foreach_element(&p->sections, e)
++	{
++		s = uci_to_section(e);
++
++		if (strcmp(s->type, "rulesgroup"))
++			continue;
++
++		rulesgroup = malloc(sizeof(*rulesgroup));
++
++		if (!rulesgroup)
++			continue;
++
++		memset(rulesgroup, 0, sizeof(*rulesgroup));
++
++		rulesgroup->enabled = true;
++
++		fw3_parse_options(rulesgroup, fw3_rulesgroup_opts, s);
++
++		if (!rulesgroup->enabled)
++		{
++			fw3_free_rulesgroup(rulesgroup);
++			continue;
++		}
++
++		if (!rulesgroup->type || strlen(rulesgroup->type) == 0)
++		{
++			warn_elem(e, "must have a non-empty type element");
++			fw3_free_rulesgroup(rulesgroup);
++			continue;
++		}
++		fw3_load_rules_ext(state, p, a, rulesgroup->type, 0);
++		fw3_free_rulesgroup(rulesgroup);
++	}
++
++}
+--- /dev/null
++++ b/rulesgroups.h
+@@ -0,0 +1,32 @@
++/*
++ * firewall3 - 3rd OpenWrt UCI firewall implementation
++ *
++ *   Copyright (C) 2013 Jean-François Remy <jean-francois.remy@technicolor.com>
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef RULESGROUP_H_
++#define RULESGROUP_H_
++
++#include "options.h"
++#include "rules.h"
++
++extern const struct fw3_option fw3_rulesgroup_opts[];
++
++void fw3_load_rulesgroups(struct fw3_state *state, struct uci_package *p, struct blob_attr *a);
++
++#define fw3_free_rulesgroup(rulesgroup) \
++	fw3_free_object(rulesgroup, fw3_rulesgroup_opts)
++
++#endif /* RULESGROUP_H_ */

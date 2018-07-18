@@ -1,0 +1,45 @@
+Version 0.2-mr1 (released 2014-02-18)
+
+* Verify transparent RSA signatures
+
+* Compile on kernel versions below 2.6.31 and above 3.9
+
+* Compile with -g
+
+* Add some scripts to debug the NCR module
+
+* Add a script to ease the comparison between vanilla and NCR versions of
+  libtomcrypt and libtommath
+
+* Add the ENFORCE_SECURITY flag to prevent key exportation and importation
+
+* Add NCRIO_LOG ioctl
+
+* Add a 'setkey' module to demonstrate how the provisioning can be done from
+  kernel space.
+  This module is provisioning the master key with random bytes and a RSA
+  private key.
+  For convenience, the module expects the RSA private key to be provided by
+  a user space program that writes to /sys/kernel/ncr-setkey/rsa_key.
+
+* Add a PERSISTENCE option to NCR.
+  This is the best way IMHO to enable kernel provisioning.
+
+  Another option would be to have the RSA key wrapped and exported to the
+  filesystem (procfs, sysfs) at a given location.
+
+  Add the 'lskeys' and 'rmkey' tools to give a way to easily see and remove
+  all the keys left behind by any NCR examples/tools/tests (that do not always
+  "deinit" the imported, generated keys or unwrapped).
+
+
+Version 0.2 (released 2012-09-03)
+
+* Transparent flag now allows for arbitrary hash sizes.
+
+
+Version 0.1.1 (released 2010-09-20)
+
+* Added several helper functions to ncr.h to simplify API.
+
+* Added examples of API usage in the examples/ directory.

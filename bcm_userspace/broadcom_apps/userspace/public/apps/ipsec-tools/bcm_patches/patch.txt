@@ -1,0 +1,7 @@
+ipsec-tools-0.6.6.patch and ipsec-tools-0.8.0.patch
+- disable code related to blowfish and cast
+- disable yywrap
+- disable openssl engine support
+- disable openssl sha2 support
+- disable rpm build
+- fix couple compile warnings

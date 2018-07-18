@@ -1,0 +1,51 @@
+
+# brcm begin
+
+#AR=ar
+#RANLIB=ranlib
+
+#CC=gcc
+#CFLAGS = -Wall -g $(KERNEL_HEADERS)
+CFLAGS = -Wall -Os -I$(KERNEL_LINKS_DIR)
+CFLAGS += -I$(TOOLCHAIN)/include
+CFLAGS += $(BRCM_WERROR_CFLAGS)
+ifneq ($(strip $(BUILD_VLAN_AGGR)),)
+CFLAGS += -DCONFIG_BCM_VLAN_AGGREGATION -DCONFIG_BCM_KF_VLAN_AGGREGATION
+endif
+# brcm end
+
+prefix=/usr/local
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib
+
+libbridge_SOURCES= \
+	libbridge_devif.c \
+	libbridge_if.c \
+	libbridge_init.c \
+	libbridge_misc.c 
+
+libbridge_OBJECTS=$(libbridge_SOURCES:.c=.o)
+
+all:	libbridge.a
+
+install: libbridge.a
+	mkdir -p $(DESTDIR)$(includedir)
+	install -m 644 libbridge.h $(DESTDIR)$(includedir)
+	mkdir -p $(DESTDIR)$(libdir)
+	install -m 644 libbridge.a $(DESTDIR)$(libdir)
+
+
+clean:
+	rm -f *.o libbridge.a
+
+libbridge.a:	$(libbridge_OBJECTS)
+	$(AR) rcs $@ $(libbridge_OBJECTS)
+	$(RANLIB) $@
+
+%.o: %.c libbridge.h libbridge_private.h
+	$(CC) $(CFLAGS) $(INCLUDE) -c $<
+
+libbridge_compat.o:	libbridge_compat.c if_index.c
+	$(CC) $(CFLAGS) -c libbridge_compat.c
+

@@ -1,0 +1,1071 @@
+diff -urN orig_iptables-1.4.0/extensions/libip6t_IMQ.c iptables-1.4.0/extensions/libip6t_IMQ.c
+--- orig_iptables-1.4.0/extensions/libip6t_IMQ.c	1969-12-31 19:00:00.000000000 -0500
++++ iptables-1.4.0/extensions/libip6t_IMQ.c	2012-11-29 18:16:53.924247504 -0500
+@@ -0,0 +1,102 @@
++/* Shared library add-on to iptables to add IMQ target support. */
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <ip6tables.h>
++#include <linux/netfilter_ipv6/ip6_tables.h>
++#include <linux/netfilter_ipv6/ip6t_IMQ.h>
++
++/* Function which prints out usage message. */
++static void
++help(void)
++{
++	printf(
++"IMQ target v%s options:\n"
++"  --todev <N>		enqueue to imq<N>, defaults to 0\n", 
++IPTABLES_VERSION);
++}
++
++static struct option opts[] = {
++	{ "todev", 1, 0, '1' },
++	{ 0 }
++};
++
++/* Initialize the target. */
++static void
++init(struct ip6t_entry_target *t, unsigned int *nfcache)
++{
++	struct ip6t_imq_info *mr = (struct ip6t_imq_info*)t->data;
++
++	mr->todev = 0;
++	*nfcache |= NFC_UNKNOWN;
++}
++
++/* Function which parses command options; returns true if it
++   ate an option */
++static int
++parse(int c, char **argv, int invert, unsigned int *flags,
++      const struct ip6t_entry *entry,
++      struct ip6t_entry_target **target)
++{
++	struct ip6t_imq_info *mr = (struct ip6t_imq_info*)(*target)->data;
++	
++	switch(c) {
++	case '1':
++		if (check_inverse(optarg, &invert, NULL, 0))
++			exit_error(PARAMETER_PROBLEM,
++				   "Unexpected `!' after --todev");
++		mr->todev=atoi(optarg);
++		break;
++	default:
++		return 0;
++	}
++	return 1;
++}
++
++static void
++final_check(unsigned int flags)
++{
++}
++
++/* Prints out the targinfo. */
++static void
++print(const struct ip6t_ip6 *ip,
++      const struct ip6t_entry_target *target,
++      int numeric)
++{
++	struct ip6t_imq_info *mr = (struct ip6t_imq_info*)target->data;
++
++	printf("IMQ: todev %u ", mr->todev);
++}
++
++/* Saves the union ipt_targinfo in parsable form to stdout. */
++static void
++save(const struct ip6t_ip6 *ip, const struct ip6t_entry_target *target)
++{
++	struct ip6t_imq_info *mr = (struct ip6t_imq_info*)target->data;
++
++	printf("--todev %u", mr->todev);
++}
++
++static
++struct ip6tables_target imq
++= { NULL,
++    "IMQ",
++    IPTABLES_VERSION,
++    IP6T_ALIGN(sizeof(struct ip6t_imq_info)),
++    IP6T_ALIGN(sizeof(struct ip6t_imq_info)),
++    &help,
++    &init,
++    &parse,
++    &final_check,
++    &print,
++    &save,
++    opts
++};
++
++void _init(void)
++{
++	register_target6(&imq);
++}
+diff -urN orig_iptables-1.4.0/extensions/libipt_DYNAHELPER.c iptables-1.4.0/extensions/libipt_DYNAHELPER.c
+--- orig_iptables-1.4.0/extensions/libipt_DYNAHELPER.c	1969-12-31 19:00:00.000000000 -0500
++++ iptables-1.4.0/extensions/libipt_DYNAHELPER.c	2012-11-29 18:16:53.924247504 -0500
+@@ -0,0 +1,150 @@
++#include <stdio.h>
++#include <ctype.h>
++#include <string.h>
++#include <stdlib.h>
++#include <syslog.h>
++#include <getopt.h>
++#include <iptables.h>
++#include <linux/netfilter_ipv4/ip_tables.h>
++#include <linux/netfilter_ipv4/ip_queue.h>
++
++#define IPT_DYNAHELPER_OPT_PROTO 0x01
++#define IPT_DYNAHELPER_OPT_TIMEOUT 0x02
++
++/****************************************************************************/
++/* Function which prints out usage message. */
++static void help(void)
++{
++	printf(
++"DYNAHELPER v%s options:\n"
++" --proto protocol		Protocol name, e.g. ftp, h323, etc.\n"
++" --timeout seconds		Helper's idle timeout.\n\n",
++IPTABLES_VERSION);
++}
++
++/****************************************************************************/
++static struct option opts[] = {
++	{.name = "proto",.has_arg = 1,.flag = 0,.val = '!'},
++	{.name = "timeout",.has_arg = 1,.flag = 0,.val = '#'},
++	{.name = 0}
++};
++
++/****************************************************************************/
++/* Initialize the target. */
++static void init(struct ipt_entry_target *t, unsigned int *nfcache)
++{
++	struct xt_dynahelper_info *info =
++	    (struct xt_dynahelper_info *) t->data;
++
++	info->tracker = NULL;
++	info->timeout = DYNAHELPER_DEFAULT_TIMEOUT;
++}
++
++/****************************************************************************/
++/* Function which parses command options; returns true if it
++   ate an option */
++static int parse(int c, char **argv, int invert, unsigned int *flags,
++		 const struct ipt_entry *entry,
++		 struct ipt_entry_target **target)
++{
++	struct xt_dynahelper_info *info =
++	    (struct xt_dynahelper_info *) (*target)->data;
++	char *p;
++
++	switch (c) {
++	case '!':
++		if (*flags & IPT_DYNAHELPER_OPT_PROTO)
++			exit_error(PARAMETER_PROBLEM,
++				   "Can't specify --proto twice");
++
++		if (check_inverse(optarg, &invert, NULL, 0))
++			exit_error(PARAMETER_PROBLEM,
++				   "Unexpected `!' after --proto");
++
++		if (strlen(optarg) > DYNAHELPER_MAXPROTONAMELEN)
++			exit_error(PARAMETER_PROBLEM,
++				   "Maximum protocol name length %u for "
++				   "--proto", DYNAHELPER_MAXPROTONAMELEN);
++
++		if (strlen(optarg) != strlen(strtok(optarg, "\n")))
++			exit_error(PARAMETER_PROBLEM,
++				   "Newlines not allowed in --proto");
++
++		strcpy(info->proto, optarg);
++		for (p = info->proto; *p; p++) {
++			if (isupper(*p))
++				*p = tolower(*p);
++		}
++		*flags |= IPT_DYNAHELPER_OPT_PROTO;
++		break;
++	case '#':
++		if (*flags & IPT_DYNAHELPER_OPT_TIMEOUT)
++			exit_error(PARAMETER_PROBLEM,
++				   "Can't specify --timeout twice");
++
++		if (check_inverse(optarg, &invert, NULL, 0))
++			exit_error(PARAMETER_PROBLEM,
++				   "Unexpected `!' after --timeout");
++
++		info->timeout = strtoul(optarg, NULL, 0);
++		*flags |= IPT_DYNAHELPER_OPT_TIMEOUT;
++		break;
++	default:
++		return 0;
++	}
++
++	return 1;
++}
++
++/****************************************************************************/
++/* Final check; nothing. */
++static void final_check(unsigned int flags)
++{
++	if (!(flags & IPT_DYNAHELPER_OPT_PROTO))
++		exit_error(PARAMETER_PROBLEM,
++			   "DYNAHELPER: must specify --proto");
++}
++
++/****************************************************************************/
++/* Prints out the targinfo. */
++static void print(const struct ipt_ip *ip,
++		  const struct ipt_entry_target *target, int numeric)
++{
++	const struct xt_dynahelper_info *info
++	    = (const struct xt_dynahelper_info *) target->data;
++
++	printf("DYNAHELPER ");
++	printf("proto %s timeout %lu", info->proto, info->timeout);
++}
++
++/****************************************************************************/
++/* Saves the union ipt_targinfo in parsable form to stdout. */
++static void save(const struct ipt_ip *ip,
++		 const struct ipt_entry_target *target)
++{
++	const struct xt_dynahelper_info *info
++	    = (const struct xt_dynahelper_info *) target->data;
++
++	printf("--proto %s --timeout %lu", info->proto, info->timeout);
++}
++
++/****************************************************************************/
++static struct iptables_target dynahelper = {
++	.name = "DYNAHELPER",
++	.version = IPTABLES_VERSION,
++	.size = IPT_ALIGN(sizeof(struct xt_dynahelper_info)),
++	.userspacesize = IPT_ALIGN(sizeof(struct xt_dynahelper_info)),
++	.help = &help,
++	.init = &init,
++	.parse = &parse,
++	.final_check = &final_check,
++	.print = &print,
++	.save = &save,
++	.extra_opts = opts
++};
++
++/****************************************************************************/
++void _init(void)
++{
++	register_target(&dynahelper);
++}
+diff -urN orig_iptables-1.4.0/extensions/libipt_IMQ.c iptables-1.4.0/extensions/libipt_IMQ.c
+--- orig_iptables-1.4.0/extensions/libipt_IMQ.c	1969-12-31 19:00:00.000000000 -0500
++++ iptables-1.4.0/extensions/libipt_IMQ.c	2012-11-29 18:16:53.924247504 -0500
+@@ -0,0 +1,102 @@
++/* Shared library add-on to iptables to add IMQ target support. */
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <iptables.h>
++#include <linux/netfilter_ipv4/ip_tables.h>
++#include <linux/netfilter_ipv4/ipt_IMQ.h>
++
++/* Function which prints out usage message. */
++static void
++help(void)
++{
++	printf(
++"IMQ target v%s options:\n"
++"  --todev <N>		enqueue to imq<N>, defaults to 0\n", 
++IPTABLES_VERSION);
++}
++
++static struct option opts[] = {
++	{ "todev", 1, 0, '1' },
++	{ 0 }
++};
++
++/* Initialize the target. */
++static void
++init(struct ipt_entry_target *t, unsigned int *nfcache)
++{
++	struct ipt_imq_info *mr = (struct ipt_imq_info*)t->data;
++
++	mr->todev = 0;
++	*nfcache |= NFC_UNKNOWN;
++}
++
++/* Function which parses command options; returns true if it
++   ate an option */
++static int
++parse(int c, char **argv, int invert, unsigned int *flags,
++      const struct ipt_entry *entry,
++      struct ipt_entry_target **target)
++{
++	struct ipt_imq_info *mr = (struct ipt_imq_info*)(*target)->data;
++	
++	switch(c) {
++	case '1':
++		if (check_inverse(optarg, &invert, NULL, 0))
++			exit_error(PARAMETER_PROBLEM,
++				   "Unexpected `!' after --todev");
++		mr->todev=atoi(optarg);
++		break;
++	default:
++		return 0;
++	}
++	return 1;
++}
++
++static void
++final_check(unsigned int flags)
++{
++}
++
++/* Prints out the targinfo. */
++static void
++print(const struct ipt_ip *ip,
++      const struct ipt_entry_target *target,
++      int numeric)
++{
++	struct ipt_imq_info *mr = (struct ipt_imq_info*)target->data;
++
++	printf("IMQ: todev %u ", mr->todev);
++}
++
++/* Saves the union ipt_targinfo in parsable form to stdout. */
++static void
++save(const struct ipt_ip *ip, const struct ipt_entry_target *target)
++{
++	struct ipt_imq_info *mr = (struct ipt_imq_info*)target->data;
++
++	printf("--todev %u", mr->todev);
++}
++
++static
++struct iptables_target imq
++= { NULL,
++    "IMQ",
++    IPTABLES_VERSION,
++    IPT_ALIGN(sizeof(struct ipt_imq_info)),
++    IPT_ALIGN(sizeof(struct ipt_imq_info)),
++    &help,
++    &init,
++    &parse,
++    &final_check,
++    &print,
++    &save,
++    opts
++};
++
++void _init(void)
++{
++	register_target(&imq);
++}
+diff -urN orig_iptables-1.4.0/extensions/libipt_MASQUERADE.c iptables-1.4.0/extensions/libipt_MASQUERADE.c
+--- orig_iptables-1.4.0/extensions/libipt_MASQUERADE.c	2007-10-15 08:45:09.000000000 -0400
++++ iptables-1.4.0/extensions/libipt_MASQUERADE.c	2012-11-29 18:16:53.924247504 -0500
+@@ -17,14 +17,15 @@
+ "				Port (range) to map to.\n"
+ " --random\n"
+ "				Randomize source port.\n"
+-"\n"
+-,
++" --mode <fullcone|symmetric>\n"
++"				NAT mode.\n\n",
+ IPTABLES_VERSION);
+ }
+ 
+ static const struct option MASQUERADE_opts[] = {
+ 	{ "to-ports", 1, NULL, '1' },
+ 	{ "random", 0, NULL, '2' },
++	{ "mode", 1, NULL, '3' },
+ 	{ }
+ };
+ 
+@@ -89,6 +90,9 @@
+ 	else
+ 		portok = 0;
+ 
++	/* Borrow this field as mode value. The default is symmetric */
++	mr->range[0].min_ip = 0;
++	
+ 	switch (c) {
+ 	case '1':
+ 		if (!portok)
+@@ -106,6 +110,16 @@
+ 		mr->range[0].flags |=  IP_NAT_RANGE_PROTO_RANDOM;
+ 		return 1;
+ 
++	case '3':
++		if (strcasecmp(optarg, "fullcone") == 0)
++			mr->range[0].min_ip = 1;
++		else if (strcasecmp(optarg, "symmetric") == 0)
++			mr->range[0].min_ip = 0;
++		else
++			exit_error(PARAMETER_PROBLEM,
++				   "Unknown mode %s", optarg);
++		return 1;
++
+ 	default:
+ 		return 0;
+ 	}
+@@ -130,6 +144,9 @@
+ 
+ 	if (r->flags & IP_NAT_RANGE_PROTO_RANDOM)
+ 		printf("random ");
++
++	if (r->min_ip == 1)
++		printf("mode: fullcone ");
+ }
+ 
+ /* Saves the union ipt_targinfo in parsable form to stdout. */
+@@ -149,6 +166,9 @@
+ 
+ 	if (r->flags & IP_NAT_RANGE_PROTO_RANDOM)
+ 		printf("--random ");
++
++	if (r->min_ip == 1)
++		printf("--mode fullcone ");
+ }
+ 
+ static struct iptables_target masquerade_target = {
+diff -urN orig_iptables-1.4.0/extensions/libipt_SKIPLOG.c iptables-1.4.0/extensions/libipt_SKIPLOG.c
+--- orig_iptables-1.4.0/extensions/libipt_SKIPLOG.c	1969-12-31 19:00:00.000000000 -0500
++++ iptables-1.4.0/extensions/libipt_SKIPLOG.c	2012-11-29 18:16:53.924247504 -0500
+@@ -0,0 +1,63 @@
++/*
++ * Shared library add-on to iptables to stop logging.
++ */
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++#include <iptables.h>
++#include <linux/netfilter_ipv4/ip_tables.h>
++
++/* Function which prints out usage message. */
++static void
++help(void)
++{
++	printf(
++"SKIPLOG target v%s takes no options\n",
++IPTABLES_VERSION);
++}
++
++static struct option opts[] = {
++	{ 0 }
++};
++
++/* Initialize the target. */
++static void
++init(struct ipt_entry_target *t, unsigned int *nfcache)
++{
++}
++
++/* Function which parses command options; returns true if it
++   ate an option */
++static int
++parse(int c, char **argv, int invert, unsigned int *flags,
++      const struct ipt_entry *entry,
++      struct ipt_entry_target **target)
++{
++	return 0;
++}
++
++static void
++final_check(unsigned int flags)
++{
++}
++
++static struct iptables_target skiplog = {
++	.next		= NULL,
++	.name		= "SKIPLOG",
++	.version	= IPTABLES_VERSION,
++	.size		= IPT_ALIGN(0),
++	.userspacesize	= IPT_ALIGN(0),
++	.help		= &help,
++	.init		= &init,
++	.parse		= &parse,
++	.final_check = &final_check,
++	.print		= NULL,
++	.save		= NULL,
++	.extra_opts	= opts
++};
++
++void _init(void)
++{
++	register_target(&skiplog);
++}
+diff -urN orig_iptables-1.4.0/extensions/libxt_MARK.c iptables-1.4.0/extensions/libxt_MARK.c
+--- orig_iptables-1.4.0/extensions/libxt_MARK.c	2007-10-15 08:45:09.000000000 -0400
++++ iptables-1.4.0/extensions/libxt_MARK.c	2012-11-29 18:16:53.925247521 -0500
+@@ -5,9 +5,29 @@
+ #include <getopt.h>
+ 
+ #include <xtables.h>
++#include <linux/version.h>
+ #include <linux/netfilter/x_tables.h>
+ #include <linux/netfilter/xt_MARK.h>
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0)
++/* Version 0 */
++struct xt_mark_target_info {
++	unsigned long mark;
++};
++
++/* Version 1 */
++enum {
++	XT_MARK_SET=0,
++	XT_MARK_AND,
++	XT_MARK_OR,
++};
++
++struct xt_mark_target_info_v1 {
++	unsigned long mark;
++	uint8_t mode;
++};
++#endif
++
+ /* Function which prints out usage message. */
+ static void MARK_help(void)
+ {
+@@ -213,9 +233,26 @@
+ 	.extra_opts	= MARK_opts,
+ };
+ 
++//brcm
++static struct xtables_target mark_target6_v1 = {
++	.family		= AF_INET6,
++	.name		= "MARK",
++	.version	= IPTABLES_VERSION,
++	.revision	= 1,
++	.size		= XT_ALIGN(sizeof(struct xt_mark_target_info_v1)),
++	.userspacesize	= XT_ALIGN(sizeof(struct xt_mark_target_info_v1)),
++	.help		= MARK_help,
++	.parse		= MARK_parse_v1,
++	.final_check	= MARK_check,
++	.print		= MARK_print_v1,
++	.save		= MARK_save_v1,
++	.extra_opts	= MARK_opts,
++};
++
+ void _init(void)
+ {
+ 	xtables_register_target(&mark_target_v0);
+ 	xtables_register_target(&mark_target_v1);
+ 	xtables_register_target(&mark_target6_v0);
++	xtables_register_target(&mark_target6_v1);
+ }
+diff -urN orig_iptables-1.4.0/extensions/libxt_SKIPLOG.c iptables-1.4.0/extensions/libxt_SKIPLOG.c
+--- orig_iptables-1.4.0/extensions/libxt_SKIPLOG.c	1969-12-31 19:00:00.000000000 -0500
++++ iptables-1.4.0/extensions/libxt_SKIPLOG.c	2012-11-29 18:16:53.925247521 -0500
+@@ -0,0 +1,51 @@
++/* Shared library add-on to iptables to add SKIPLOG target support. */
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <xtables.h>
++#include <linux/netfilter/x_tables.h>
++
++/* Function which prints out usage message. */
++static void SKIPLOG_help(void)
++{
++	printf(
++"SKIPLOG target v%s takes no options\n",
++IPTABLES_VERSION);
++}
++
++/* Function which parses command options; returns true if it
++   ate an option */
++static int
++SKIPLOG_parse(int c, char **argv, int invert, unsigned int *flags,
++              const void *entry, struct xt_entry_target **target)
++{
++	return 0;
++}
++
++static struct xtables_target skiplog_target = {
++	.family		= AF_INET,
++	.name		= "SKIPLOG",
++	.version	= IPTABLES_VERSION,
++	.size		= XT_ALIGN(0),
++	.userspacesize	= XT_ALIGN(0),
++	.help		= SKIPLOG_help,
++	.parse		= SKIPLOG_parse,
++};
++
++static struct xtables_target skiplog_target6 = {
++	.family		= AF_INET6,
++	.name		= "SKIPLOG",
++	.version	= IPTABLES_VERSION,
++	.size		= XT_ALIGN(0),
++	.userspacesize	= XT_ALIGN(0),
++	.help		= SKIPLOG_help,
++	.parse		= SKIPLOG_parse,
++};
++
++void _init(void)
++{
++	xtables_register_target(&skiplog_target);
++	xtables_register_target(&skiplog_target6);
++}
+diff -urN orig_iptables-1.4.0/extensions/Makefile iptables-1.4.0/extensions/Makefile
+--- orig_iptables-1.4.0/extensions/Makefile	2007-12-22 07:44:18.000000000 -0500
++++ iptables-1.4.0/extensions/Makefile	2012-11-29 18:16:53.924247504 -0500
+@@ -5,9 +5,32 @@
+ # header files are present in the include/linux directory of this iptables
+ # package (HW)
+ #
+-PF_EXT_SLIB:=ah addrtype conntrack ecn icmp iprange owner policy realm recent tos ttl unclean CLUSTERIP DNAT ECN LOG MASQUERADE MIRROR NETMAP REDIRECT REJECT SAME SNAT TOS TTL ULOG
++
++#BRCM begin
++#PF_EXT_SLIB:=ah addrtype conntrack ecn icmp iprange owner policy realm recent tos ttl unclean CLUSTERIP DNAT ECN LOG MASQUERADE MIRROR NETMAP REDIRECT REJECT SAME SNAT TOS TTL ULOG
++#PF6_EXT_SLIB:=ah dst eui64 frag hbh hl icmp6 ipv6header mh owner policy rt HL LOG REJECT
++#PFX_EXT_SLIB:=connbytes connmark connlimit comment dccp dscp esp hashlimit helper length limit mac mark multiport physdev pkttype quota sctp state statistic standard string tcp tcpmss time u32 udp CLASSIFY CONNMARK DSCP MARK NFLOG NFQUEUE NOTRACK TCPMSS TRACE
++
++PF_EXT_SLIB:=icmp
++PFX_EXT_SLIB:=TCPMSS SKIPLOG
++ifneq ($(strip $(BRCM_KERNEL_NF_FIREWALL)),)
++PF_EXT_SLIB+=LOG
++PFX_EXT_SLIB+=length limit standard state tcp udp NFQUEUE
++endif
++ifneq ($(strip $(BRCM_KERNEL_NF_NAT)),)
++PF_EXT_SLIB+=DNAT MASQUERADE REDIRECT SNAT
++ifneq ($(strip $(BUILD_DYNAHELPER)),)
++PF_EXT_SLIB+=DYNAHELPER
++endif
++endif
++ifneq ($(strip $(BRCM_KERNEL_NF_MANGLE)),)
++PFX_EXT_SLIB+=dscp DSCP mac mark MARK
++endif
++
++ifneq ($(strip $(BUILD_IPV6)),)
+ PF6_EXT_SLIB:=ah dst eui64 frag hbh hl icmp6 ipv6header mh owner policy rt HL LOG REJECT
+-PFX_EXT_SLIB:=connbytes connmark connlimit comment dccp dscp esp hashlimit helper length limit mac mark multiport physdev pkttype quota sctp state statistic standard string tcp tcpmss time u32 udp CLASSIFY CONNMARK DSCP MARK NFLOG NFQUEUE NOTRACK TCPMSS TRACE
++endif
++# BRCM end
+ 
+ PF_EXT_SELINUX_SLIB:=
+ PF6_EXT_SELINUX_SLIB:=
+@@ -19,10 +42,12 @@
+ PFX_EXT_SE_SLIB:=$(PFX_EXT_SELINUX_SLIB)
+ endif
+ 
++#BRCM begin
+ # Optionals
+-PF_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-test),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
+-PF6_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-test6),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
+-PFX_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-testx),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
++#PF_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-test),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
++#PF6_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-test6),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
++#PFX_EXT_SLIB_OPTS:=$(foreach T,$(wildcard extensions/.*-testx),$(shell KERNEL_DIR=$(KERNEL_DIR) $(T)))
++# BRCM end
+ 
+ PF_EXT_ALL_SLIB:=$(PF_EXT_SLIB) $(PF_EXT_SE_SLIB) $(PF_EXT_SLIB_OPTS)
+ PF6_EXT_ALL_SLIB:=$(PF6_EXT_SLIB) $(PF6_EXT_SE_SLIB) $(PF6_EXT_SLIB_OPTS)
+@@ -174,11 +199,15 @@
+ endif
+ 
+ ifdef NO_SHARED_LIBS
++# BRCM begin
+ extensions/libext.a: $(EXT_OBJS)
+-	rm -f $@; ar crv $@ $(EXT_OBJS)
++#	rm -f $@; ar crv $@ $(EXT_OBJS)
++	rm -f $@; $(AR) crv $@ $(EXT_OBJS)
+ 
+ extensions/libext6.a: $(EXT6_OBJS)
+-	rm -f $@; ar crv $@ $(EXT6_OBJS)
++#	rm -f $@; ar crv $@ $(EXT6_OBJS)
++	rm -f $@; $(AR) crv $@ $(EXT6_OBJS)
++# BRCM end
+ 
+ extensions/initext.o: extensions/initext.c
+ extensions/initext6.o: extensions/initext6.c
+diff -urN orig_iptables-1.4.0/include/iptables.h iptables-1.4.0/include/iptables.h
+--- orig_iptables-1.4.0/include/iptables.h	2007-08-06 04:51:02.000000000 -0400
++++ iptables-1.4.0/include/iptables.h	2012-11-29 18:16:53.925247521 -0500
+@@ -3,6 +3,8 @@
+ 
+ #include "xtables.h"
+ #include "libiptc/libiptc.h"
++#include <linux/version.h>
++
+ 
+ #ifndef IPT_LIB_DIR
+ #define IPT_LIB_DIR XT_LIB_DIR
+@@ -51,4 +53,14 @@
+ #define LINUX_VERSION_MINOR(x)	(((x)>> 8) & 0xFF)
+ #define LINUX_VERSION_PATCH(x)	( (x)      & 0xFF)
+ 
++
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
++#define IP_NAT_RANGE_PROTO_RANDOM        NF_NAT_RANGE_PROTO_RANDOM
++#define IP_NAT_RANGE_MAP_IPS             NF_NAT_RANGE_MAP_IPS
++#define IP_NAT_RANGE_PROTO_SPECIFIED     NF_NAT_RANGE_PROTO_SPECIFIED
++#define IP_NAT_RANGE_PERSISTENT          NF_NAT_RANGE_PERSISTENT
++#define ip_nat_multi_range               nf_nat_ipv4_multi_range_compat
++#define ip_nat_range                     nf_nat_ipv4_range
++#endif
++
+ #endif /*_IPTABLES_USER_H*/
+diff -urN orig_iptables-1.4.0/ip6tables.c iptables-1.4.0/ip6tables.c
+--- orig_iptables-1.4.0/ip6tables.c	2007-12-22 07:44:18.000000000 -0500
++++ iptables-1.4.0/ip6tables.c	2012-11-29 18:16:53.925247521 -0500
+@@ -678,7 +678,7 @@
+ 	for (i = 0, j = 0; i < n; i++) {
+ 		int k;
+ 		for (k = 0; k < 4; k++)
+-			addrp[j].in6_u.u6_addr32[k] &= maskp->in6_u.u6_addr32[k];
++			addrp[j].s6_addr32[k] &= maskp->s6_addr32[k];
+ 		j++;
+ 		for (k = 0; k < j - 1; k++) {
+ 			if (IN6_ARE_ADDR_EQUAL(&addrp[k], &addrp[j - 1])) {
+diff -urN orig_iptables-1.4.0/iptables-standalone.c iptables-1.4.0/iptables-standalone.c
+--- orig_iptables-1.4.0/iptables-standalone.c	2007-01-23 07:50:01.000000000 -0500
++++ iptables-1.4.0/iptables-standalone.c	2012-11-29 18:16:53.925247521 -0500
+@@ -37,7 +37,9 @@
+ #include <string.h>
+ #include <iptables.h>
+ 
+-#ifdef IPTABLES_MULTI
++// brcm begin
++#if defined (IPTABLES_MULTI) || defined (BUILD_STATIC)
++// brcm end
+ int
+ iptables_main(int argc, char *argv[])
+ #else
+diff -urN orig_iptables-1.4.0/libiptc/libip6tc.c iptables-1.4.0/libiptc/libip6tc.c
+--- orig_iptables-1.4.0/libiptc/libip6tc.c	2007-10-15 08:45:08.000000000 -0400
++++ iptables-1.4.0/libiptc/libip6tc.c	2012-11-29 18:16:53.926247529 -0500
+@@ -27,6 +27,7 @@
+ typedef unsigned int socklen_t;
+ #endif
+ 
++#include <linux/version.h>
+ #include "libiptc/libip6tc.h"
+ 
+ #define HOOK_PRE_ROUTING	NF_IP6_PRE_ROUTING
+@@ -112,8 +113,13 @@
+ 
+ #include "libiptc.c"
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,2,0)
++#define BIT6(a, l) \
++ ((ntohl(a->s6_addr32[(l) / 32]) >> (31 - ((l) & 31))) & 1)
++#else
+ #define BIT6(a, l) \
+  ((ntohl(a->in6_u.u6_addr32[(l) / 32]) >> (31 - ((l) & 31))) & 1)
++#endif
+ 
+ int
+ ipv6_prefix_length(const struct in6_addr *a)
+diff -urN orig_iptables-1.4.0/libiptc/libiptc.c iptables-1.4.0/libiptc/libiptc.c
+--- orig_iptables-1.4.0/libiptc/libiptc.c	2007-12-22 07:44:18.000000000 -0500
++++ iptables-1.4.0/libiptc/libiptc.c	2012-11-29 18:16:53.926247529 -0500
+@@ -59,8 +59,10 @@
+ #endif
+ };
+ 
++
++
+ /* Convenience structures */
+-struct ipt_error_target
++struct ipt_error_target_2
+ {
+ 	STRUCT_ENTRY_TARGET t;
+ 	char error[TABLE_MAXNAMELEN];
+@@ -594,10 +596,10 @@
+ /* Convenience structures */
+ struct iptcb_chain_start{
+ 	STRUCT_ENTRY e;
+-	struct ipt_error_target name;
++	struct ipt_error_target_2 name;
+ };
+ #define IPTCB_CHAIN_START_SIZE	(sizeof(STRUCT_ENTRY) +			\
+-				 ALIGN(sizeof(struct ipt_error_target)))
++				 ALIGN(sizeof(struct ipt_error_target_2)))
+ 
+ struct iptcb_chain_foot {
+ 	STRUCT_ENTRY e;
+@@ -608,10 +610,10 @@
+ 
+ struct iptcb_chain_error {
+ 	STRUCT_ENTRY entry;
+-	struct ipt_error_target target;
++	struct ipt_error_target_2 target;
+ };
+ #define IPTCB_CHAIN_ERROR_SIZE	(sizeof(STRUCT_ENTRY) +			\
+-				 ALIGN(sizeof(struct ipt_error_target)))
++				 ALIGN(sizeof(struct ipt_error_target_2)))
+ 
+ 
+ 
+@@ -656,7 +658,7 @@
+ 		head->e.next_offset = IPTCB_CHAIN_START_SIZE;
+ 		strcpy(head->name.t.u.user.name, ERROR_TARGET);
+ 		head->name.t.u.target_size = 
+-				ALIGN(sizeof(struct ipt_error_target));
++				ALIGN(sizeof(struct ipt_error_target_2));
+ 		strcpy(head->name.error, c->name);
+ 	} else {
+ 		repl->hook_entry[c->hooknum-1] = c->head_offset;	
+@@ -700,7 +702,7 @@
+ 	if (!iptcc_is_builtin(c))  {
+ 		/* Chain has header */
+ 		*offset += sizeof(STRUCT_ENTRY) 
+-			     + ALIGN(sizeof(struct ipt_error_target));
++			     + ALIGN(sizeof(struct ipt_error_target_2));
+ 		(*num)++;
+ 	}
+ 
+@@ -740,7 +742,7 @@
+ 	/* Append one error rule at end of chain */
+ 	num++;
+ 	offset += sizeof(STRUCT_ENTRY)
+-		  + ALIGN(sizeof(struct ipt_error_target));
++		  + ALIGN(sizeof(struct ipt_error_target_2));
+ 
+ 	/* ruleset size is now in offset */
+ 	*size = offset;
+@@ -764,7 +766,7 @@
+ 	error->entry.target_offset = sizeof(STRUCT_ENTRY);
+ 	error->entry.next_offset = IPTCB_CHAIN_ERROR_SIZE;
+ 	error->target.t.u.user.target_size = 
+-		ALIGN(sizeof(struct ipt_error_target));
++		ALIGN(sizeof(struct ipt_error_target_2));
+ 	strcpy((char *)&error->target.t.u.user.name, ERROR_TARGET);
+ 	strcpy((char *)&error->target.error, "ERROR");
+ 
+diff -urN orig_iptables-1.4.0/libiptc/Makefile iptables-1.4.0/libiptc/Makefile
+--- orig_iptables-1.4.0/libiptc/Makefile	2007-01-23 07:49:53.000000000 -0500
++++ iptables-1.4.0/libiptc/Makefile	2012-11-29 18:16:53.925247521 -0500
+@@ -2,23 +2,27 @@
+ 
+ EXTRAS+=libiptc/libiptc.a
+ 
+-# libiptc is not a public interface and therefore not installed
+-# DEVEL_LIBS+=libiptc/libiptc.a
+ 
+-ifndef TOPLEVEL_INCLUDED
+-local:
+-	cd .. && $(MAKE) $(KERN_TARGETS) $(SHARED_LIBS) $(EXTRAS)
+-
+-else
+ EXTRA_DEPENDS+=libiptc/libip4tc.d
++LIBIPTC_OBJS := libiptc/libip4tc.o
++
++# This original way of specifying the libiptc.a library elements sometimes
++# fails during mulit-threaded makes.  One thread creates the lib for 
++# libip4tc.o and another thread creates another copy of the lib for libip6tc.o
++#libiptc/libiptc.a: libiptc/libiptc.a(libiptc/libip4tc.o)
+ 
+-libiptc/libiptc.a: libiptc/libiptc.a(libiptc/libip4tc.o)
+ 
+ ifeq ($(DO_IPV6), 1)
+ EXTRA_DEPENDS+= libiptc/libip6tc.d
+-libiptc/libiptc.a: libiptc/libiptc.a(libiptc/libip6tc.o)
++LIBIPTC_OBJS += libiptc/libip6tc.o
++#libiptc/libiptc.a: libiptc/libiptc.a(libiptc/libip6tc.o)
+ endif
+ 
++
++# this is the multi-thread safe way of creating the archive
++libiptc/libiptc.a: $(LIBIPTC_OBJS)
++	rm -f $@; $(AR) crv $@ $(LIBIPTC_OBJS)
++
++
+ libiptc/libip4tc.d libiptc/libip6tc.d: %.d: %.c
+-	@-$(CC) -M -MG $(CFLAGS) $< | sed -e 's@^.*\.o:@$*.d libiptc/libiptc.a($*.o):@' > $@
+-endif
++	@-$(CC) -M -MG $(CFLAGS) $< | sed -e 's@^.*\.o:@$*.d libiptc/libiptc.a:@' > $@
+diff -urN orig_iptables-1.4.0/Makefile iptables-1.4.0/Makefile
+--- orig_iptables-1.4.0/Makefile	2007-12-22 07:44:46.000000000 -0500
++++ iptables-1.4.0/Makefile	2012-11-29 18:16:53.924247504 -0500
+@@ -1,8 +1,30 @@
+-# uncomment this to get a fully statically linked version
+-# NO_SHARED_LIBS = 1
++# BRCM begin
+ 
+-# uncomment this to disable IPv6 support
+-# DO_IPV6 = 0
++# default target must appear first in the Makefile
++# We only use dynamic now, never static
++dynamic: install
++static: iptables.a 
++
++
++#
++# Set our CommEngine directory (by splitting the pwd into two words
++# at /userspace and taking the first word only).
++# Then include the common defines under CommEngine.
++# You do not need to modify this part.
++#
++BUILD_DIR:=$(subst /userspace, /userspace,$(shell pwd))
++BUILD_DIR:=$(word 1, $(BUILD_DIR))
++
++include $(BUILD_DIR)/make.common
++
++
++ifndef DESTDIR
++DESTDIR=$(INSTALL_DIR)
++endif
++
++
++NO_SHARED_LIBS = 1
++# BRCM end
+ 
+ ######################################################################
+ # YOU SHOULD NOT NEED TO TOUCH ANYTHING BELOW THIS LINE
+@@ -23,9 +45,15 @@
+ IPTABLES_VERSION:=1.4.0
+ OLD_IPTABLES_VERSION:=1.4.0rc1
+ 
+-PREFIX:=/usr/local
++# BRCM begin
++#PREFIX:=/usr/local
++PREFIX:=
++# BRCM end
+ LIBDIR:=$(PREFIX)/lib
+-BINDIR:=$(PREFIX)/sbin
++# BRCM begin
++#BINDIR:=$(PREFIX)/sbin
++BINDIR:=$(PREFIX)/bin
++# BRCM end
+ MANDIR:=$(PREFIX)/man
+ INCDIR:=$(PREFIX)/include
+ 
+@@ -33,39 +61,74 @@
+ RELEASE_DIR:=/tmp
+ 
+ # Need libc6 for this.  FIXME: Should covert to autoconf.
+-ifeq ($(shell [ -f /usr/include/netinet/ip6.h ] && echo YES), YES)
++# BRCM begin
++ifneq ($(strip $(BUILD_IPV6)),)
++#ifeq ($(shell [ -f /usr/include/netinet/ip6.h ] && echo YES), YES)
+ DO_IPV6:=1
+ endif
++# BRCM end
++
++# BRCM begin
++#COPT_FLAGS:=-O2
++COPT_FLAGS:=-s -Os
++CFLAGS:=$(COPT_FLAGS) -Wall -Wunused -I$(KERNEL_DIR)/include -I$(KERNEL_DIR)/arch/mips/include -I$(KERNEL_DIR)/include/asm-mips/mach-generic -Iinclude/ -DIPTABLES_VERSION=\"$(IPTABLES_VERSION)\" #-g -DDEBUG #-pg # -DIPTC_DEBUG
++CFLAGS += -I$(TOOLCHAIN)/include
++
++ifdef NO_SHARED_LIBS
++CFLAGS += $(BRCM_APP_CFLAGS)
++else
++CFLAGS += $(BRCM_SO_CFLAGS)
++endif
++
++
++ifeq ($(strip $(BUILD_IPTABLES)), static)
++CFLAGS += -DBUILD_STATIC
++endif
++
++ifeq ($(strip $(DESKTOP_LINUX)),y)
++# some apps, such as iptables and iproute2, include MIPS kernel header files
++# which need to know what endieness we are.  Fake the settings here.  We will
++# not run those apps on the desktop anyways.
++CFLAGS += -D__MIPSEL__ -D_MIPS_SZLONG=32
++endif
++
++# BRCM end
+ 
+ # Enable linking to libselinux via enviornment 'DO_SELINUX=1'
+ ifndef DO_SELINUX
+ DO_SELINUX=0
+ endif
+ 
+-COPT_FLAGS:=-O2
+-CFLAGS:=$(COPT_FLAGS) -Wall -Wunused -I$(KBUILD_OUTPUT)/include -I$(KERNEL_DIR)/include -Iinclude/ -DIPTABLES_VERSION=\"$(IPTABLES_VERSION)\" #-g -DDEBUG #-pg # -DIPTC_DEBUG
+ 
+ ifdef NO_SHARED_LIBS
+ CFLAGS += -DNO_SHARED_LIBS=1
+ endif
+ 
+ EXTRAS+=iptables iptables.o iptables.8
+-EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/iptables $(DESTDIR)$(MANDIR)/man8/iptables.8
++# BRCM begin
++#EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/iptables $(DESTDIR)$(MANDIR)/man8/iptables.8
++EXTRA_INSTALLS+=$(DESTDIR)/bin/iptables
++# BRCM end
+ 
+ # No longer experimental.
+-ifneq ($(DO_MULTI), 1)
+-EXTRAS+=iptables-save iptables-restore iptables-xml
+-endif
+-EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/iptables-save $(DESTDIR)$(BINDIR)/iptables-restore $(DESTDIR)$(BINDIR)/iptables-xml $(DESTDIR)$(MANDIR)/man8/iptables-restore.8 $(DESTDIR)$(MANDIR)/man8/iptables-save.8
++# BRCM begin
++# ifneq ($(DO_MULTI), 1)
++# EXTRAS+=iptables-save iptables-restore iptables-xml
++# endif
++# EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/iptables-save $(DESTDIR)$(BINDIR)/iptables-restore $(DESTDIR)$(BINDIR)/iptables-xml $(DESTDIR)$(MANDIR)/man8/iptables-restore.8 $(DESTDIR)$(MANDIR)/man8/iptables-save.8
++# BRCM end
+ 
+ ifeq ($(DO_IPV6), 1)
++# BRCM begin
+ EXTRAS+=ip6tables ip6tables.o ip6tables.8
+-EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/ip6tables $(DESTDIR)$(MANDIR)/man8/ip6tables.8
++# EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/ip6tables $(DESTDIR)$(MANDIR)/man8/ip6tables.8
++EXTRA_INSTALLS+=$(DESTDIR)/bin/ip6tables
+ 
+-ifneq ($(DO_MULTI), 1)
+-EXTRAS+=ip6tables-save ip6tables-restore
+-endif
+-EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/ip6tables-save $(DESTDIR)$(BINDIR)/ip6tables-restore $(DESTDIR)$(MANDIR)/man8/ip6tables-save.8 $(DESTDIR)$(MANDIR)/man8/ip6tables-restore.8
++# ifneq ($(DO_MULTI), 1)
++# EXTRAS+=ip6tables-save ip6tables-restore
++# endif
++# EXTRA_INSTALLS+=$(DESTDIR)$(BINDIR)/ip6tables-save $(DESTDIR)$(BINDIR)/ip6tables-restore $(DESTDIR)$(MANDIR)/man8/ip6tables-save.8 $(DESTDIR)$(MANDIR)/man8/ip6tables-restore.8
++# BRCM end
+ endif
+ 
+ ifndef IPT_LIBDIR
+@@ -88,13 +151,17 @@
+ DEPFILES = $(EXT_OBJS:%.o=%.d)
+ STATIC_LIBS  = extensions/libext.a
+ STATIC6_LIBS = extensions/libext6.a
+-LDFLAGS      = -static
++# BRCM begin
++#LDFLAGS      = -static
++LDFLAGS      += -Wl,--allow-shlib-undefined
++# BRCM end
+ LDLIBS	     =
+ ifeq ($(DO_SELINUX), 1)
+ LDLIBS       += -lselinux
+ endif
+ endif
+ 
++
+ .PHONY: default
+ default: print-extensions all
+ 
+@@ -105,6 +172,11 @@
+ iptables.o: iptables.c
+ 	$(CC) $(CFLAGS) -DIPT_LIB_DIR=\"$(IPT_LIBDIR)\" -c -o $@ $<
+ 
++# BRCM begin
++iptables.a: iptables-standalone.o iptables.o  $(STATIC_LIBS) libiptc/libiptc.a
++	$(AR) rcs $@ $^
++# BRCM end
++
+ ifeq ($(DO_MULTI), 1)
+ iptables: iptables-multi.c iptables-save.c iptables-restore.c iptables-xml.c iptables-standalone.c iptables.o xtables.o $(STATIC_LIBS) libiptc/libiptc.a
+ 	$(CC) $(CFLAGS) -DIPTABLES_MULTI -DIPT_LIB_DIR=\"$(IPT_LIBDIR)\" $(LDFLAGS) -o $@ $^ $(LDLIBS)
+diff -urN orig_iptables-1.4.0/Rules.make iptables-1.4.0/Rules.make
+--- orig_iptables-1.4.0/Rules.make	2007-01-23 07:50:01.000000000 -0500
++++ iptables-1.4.0/Rules.make	2012-11-29 18:16:53.924247504 -0500
+@@ -8,6 +8,7 @@
+ clean: $(EXTRA_CLEANS)
+ 	rm -f $(SHARED_LIBS) $(SHARED_SE_LIBS) $(EXTRAS) $(EXTRAS_EXP) $(SHARED_LIBS:%.so=%_sh.o) $(SHARED_SE_LIBS:%.so=%_sh.o)
+ 	rm -f extensions/initext.c extensions/initext6.c
++	rm -f $(DEPFILES) $(EXTRA_DEPENDS) .makefirst
+ 	@find . -name '*.[ao]' -o -name '*.so' | xargs rm -f
+ 
+ install: all $(EXTRA_INSTALLS)

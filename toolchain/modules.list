@@ -1,0 +1,8 @@
+[
+    "libc",
+    "libgcc",
+    "libpthread",
+    "librt",
+    "libssp",
+    "libstdcpp"
+]

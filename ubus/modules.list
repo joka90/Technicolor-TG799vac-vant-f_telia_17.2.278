@@ -1,0 +1,6 @@
+[
+    "libubus",
+    "libubus-lua",
+    "ubus",
+    "ubusd"
+]

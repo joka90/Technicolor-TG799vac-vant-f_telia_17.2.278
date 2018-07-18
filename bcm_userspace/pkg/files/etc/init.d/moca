@@ -1,0 +1,110 @@
+#!/bin/sh /etc/rc.common
+
+START=22
+STOP=90
+
+USE_PROCD=1
+
+mocad_configure_interface() {
+    local interface=$1
+    local interface_enable
+    local sco
+    local pco
+    local rf_band
+    local turbo
+    local bonding
+    local preferred_nc
+    local beacon_pwr_limit
+    local tx_pwr_limit
+    local max_tx_pwr
+    local persistent_parameters
+
+    config_get_bool interface_enable $interface enable 0
+    if [ -e /dev/b$interface ] && [ "$interface_enable" == '1' ] ; then
+        config_get sco $interface sco 1
+        config_get pco $interface pco 1
+        config_get rf_band $interface rf_band 2
+        config_get_bool turbo $interface turbo 0
+        config_get_bool bonding $interface bonding 0
+        config_get_bool preferred_nc $interface preferred_nc 1
+        config_get beacon_pwr_limit $interface beacon_pwr_limit 0
+        config_get tx_pwr_limit $interface tx_pwr_limit 0
+        config_get persistent_parameters $interface persistent_parameters ""
+        max_tx_pwr="$((3 - $tx_pwr_limit))"
+        # This is just a temporary fix for NG-82119, need a long term fix, the follow-up story is NG-83694.
+        sleep 2
+        # setup all persistent values.  That is those set from the mocap command line utility or GCAP/DCAP
+        if [ "$persistent_parameters" != "" ]; then
+           mocap $interface set $persistent_parameters
+        fi
+        mocap $interface set --pco $pco --sco $sco --rf_band $rf_band \
+            --bonding $bonding --turbo_en $turbo --max_tx_power $max_tx_pwr \
+            --preferred_nc $preferred_nc
+        if [ "$beacon_pwr_limit" == "0" ] ; then
+            mocap $interface set --beacon_pwr_reduction_en 0
+        else
+            mocap $interface set --beacon_pwr_reduction_en 1 --beacon_pwr_reduction $beacon_pwr_limit
+        fi
+        mocap $interface set --restart
+    fi
+}
+
+mocad_add_interface() {
+    local interface=$1
+    local interface_enable
+    local acs
+    local freq
+
+    config_get_bool interface_enable $interface enable 0
+
+    if [ -e /dev/b$interface ] && [ "$interface_enable" == "1" ] ; then
+        config_get_bool acs $interface acs 1
+        config_get freq $interface freq 1150
+        procd_open_instance
+        procd_set_param command /usr/bin/mocad
+        procd_append_param command -d /dev/b$interface
+        procd_append_param command -i $interface
+        procd_append_param command -f /etc/moca/moca20core.bin
+        procd_append_param command -w
+        [ "$acs" != "1" ] && procd_append_param command -F $freq
+        procd_close_instance
+    fi
+}
+
+mocad_stop_interface() {
+    mocap $1 set --stop > /dev/null 2>&1
+}
+
+start_service() {
+    local glb_enable
+
+    config_load moca
+    config_get_bool glb_enable global enable 0
+
+    if [ "$glb_enable" == "1" ] ; then
+        config_foreach mocad_add_interface interface
+    fi
+}
+
+service_started() {
+    local glb_enable
+
+    config_load moca
+    config_get_bool glb_enable global enable 0
+
+    if [ "$glb_enable" == "1" ] ; then
+        config_foreach mocad_configure_interface interface
+    fi
+    ubus call moca reload > /dev/null 2>&1
+}
+
+reload_service() {
+    stop
+    start
+}
+
+stop_service() {
+    config_load moca
+    config_foreach mocad_stop_interface interface
+    ubus call moca reload > /dev/null 2>&1
+}

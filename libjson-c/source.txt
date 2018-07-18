@@ -1,0 +1,4 @@
+Source: json-c-0.12.1-nodoc.tar.gz
+Source-Url: https://s3.amazonaws.com/json-c_releases/releases/
+Source-Version: 
+Source-Proto: 

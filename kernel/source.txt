@@ -1,0 +1,4 @@
+Source: linux-3.4.11.tar.bz2
+Source-Url: https://www.kernel.org/pub/linux/kernel/v3.x/
+Source-Version:
+Source-Proto:

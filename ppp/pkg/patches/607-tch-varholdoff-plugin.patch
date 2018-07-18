@@ -1,0 +1,121 @@
+--- a/pppd/plugins/Makefile.linux
++++ b/pppd/plugins/Makefile.linux
+@@ -25,7 +25,7 @@ endif
+ ifeq (.depend,$(wildcard .depend))
+ include .depend
+ endif
+-PLUGINS += connstate.so
++PLUGINS += connstate.so varholdoff.so
+ 
+ connstate.so: connstate.c
+ 	$(CC) -o $@ $(LDFLAGS) -lubus -lubox $(CFLAGS) $^
+--- /dev/null
++++ b/pppd/plugins/varholdoff.c
+@@ -0,0 +1,107 @@
++/*
++ * varholdoff.c - pppd plugin for variable holdoff intervals
++ *
++ *  executed with the arguments
++ *    holdoff_script ipparam current_holdoff no_of_consecutive_errors error_description
++ */
++
++#include <stdio.h>
++
++#include "pppd.h"
++
++char pppd_version[] = VERSION;
++
++static char path_holdoff_script[MAXPATHLEN] = "";
++
++static option_t varholdoff_options[] = {
++    { "holdoff-script", o_string, path_holdoff_script,
++      "Set pathname of holdoff script",
++      OPT_STATIC, NULL, MAXPATHLEN },
++	{ NULL }
++};
++
++static char *exitstatus_name(int exitstatus)
++{
++    static char *exitstatus_names[] = {
++        [EXIT_OK]                   = "OK",
++        [EXIT_FATAL_ERROR]          = "FATAL_ERROR",
++        [EXIT_OPTION_ERROR]         = "OPTION_ERROR",
++        [EXIT_NOT_ROOT]             = "NOT_ROOT",
++        [EXIT_NO_KERNEL_SUPPORT]    = "NO_KERNEL_SUPPORT",
++        [EXIT_USER_REQUEST]         = "USER_REQUEST",
++        [EXIT_LOCK_FAILED]          = "LOCK_FAILED",
++        [EXIT_OPEN_FAILED]          = "OPEN_FAILED",
++        [EXIT_CONNECT_FAILED]       = "CONNECT_FAILED",
++        [EXIT_PTYCMD_FAILED]        = "PTYCMD_FAILED",
++        [EXIT_NEGOTIATION_FAILED]   = "NEGOTIATION_FAILED",
++        [EXIT_PEER_AUTH_FAILED]     = "PEER_AUTH_FAILED",
++        [EXIT_IDLE_TIMEOUT]         = "IDLE_TIMEOUT",
++        [EXIT_CONNECT_TIME]         = "CONNECT_TIME",
++        [EXIT_CALLBACK]             = "CALLBACK",
++        [EXIT_PEER_DEAD]            = "PEER_DEAD",
++        [EXIT_HANGUP]               = "HANGUP",
++        [EXIT_LOOPBACK]             = "LOOPBACK",
++        [EXIT_INIT_FAILED]          = "INIT_FAILED",
++        [EXIT_AUTH_TOPEER_FAILED]   = "AUTH_TOPEER_FAILED",
++#ifdef MAXOCTETS
++        [EXIT_TRAFFIC_LIMIT]        = "TRAFFIC_LIMIT",
++#endif
++        [EXIT_CNID_AUTH_FAILED]     = "CNID_AUTH_FAILED",
++    };
++    char *name = NULL;
++
++    if (exitstatus >= 0 && exitstatus < sizeof(exitstatus_names)/sizeof(exitstatus_names[0]))
++        name = exitstatus_names[exitstatus];
++    if (name == NULL)
++        name = "???";
++
++    return name;
++}
++
++static int varholdoff(void)
++{
++    if (!need_holdoff)
++        return 0;
++
++    while (path_holdoff_script[0] && ipparam) {
++        char cmd[2 * MAXPATHLEN];
++        int cmdlen;
++        FILE *fcmd;
++        int newholdoff;
++
++        cmdlen = snprintf(cmd, sizeof(cmd), "'%s' '%s' %u %u '%s'",
++                path_holdoff_script, ipparam,
++                (unsigned)holdoff, (unsigned)unsuccess,
++                exitstatus_name(status));
++        if (cmdlen >= (int)sizeof(cmd)) {
++            error("Varholdoff: command line too long");
++            break;
++        }
++
++        fcmd = popen(cmd, "r");
++        if (fcmd == NULL) {
++            error("Varholdoff: failed to execute script");
++            break;
++        }
++
++        if (fscanf(fcmd, "%d", &newholdoff) != 1 || newholdoff <= 0)
++            error("Varholdoff: failed to parse script output");
++        else if (holdoff != newholdoff) {
++            notice("Varholdoff: holdoff interval set to %d", newholdoff);
++            holdoff = newholdoff;
++        }
++
++        pclose(fcmd);
++	break;
++    }
++
++    return holdoff;
++}
++
++void plugin_init(void)
++{
++    holdoff_hook = varholdoff;
++
++    add_options(varholdoff_options);
++}
++

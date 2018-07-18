@@ -1,0 +1,4 @@
+Source: ebtables-2015-10-28.tar.gz
+Source-Url: git://git.netfilter.org/ebtables
+Source-Version: 4c3e5cd3dbae3ea773e9dcca7cf019b2713af70d
+Source-Proto: 

@@ -1,0 +1,4 @@
+config TCHBLINFO
+	tristate "Technicolor bootloader information"
+	help
+        this kernel module provides the bootloader version to userspace

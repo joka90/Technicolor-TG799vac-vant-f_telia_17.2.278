@@ -1,0 +1,11 @@
+--- a/QMIDevice.c
++++ b/QMIDevice.c
+@@ -2686,7 +2686,7 @@ int UserspaceClose(
+       rcu_read_lock();
+       for_each_process( pEachTask )
+       {
+-         if (pEachTask == NULL || pEachTask->files == NULL)
++         if (pEachTask == NULL || pEachTask->files == NULL || pEachTask->files->fdt)
+          {
+             // Some tasks may not have files (e.g. Xsession)
+             continue;

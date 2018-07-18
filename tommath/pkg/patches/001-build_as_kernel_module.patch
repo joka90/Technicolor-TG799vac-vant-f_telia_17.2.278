@@ -1,0 +1,368 @@
+Binary files libtommath-1.0.orig/.bn_mp_rand.c.swp and libtommath-1.0/.bn_mp_rand.c.swp differ
+diff -Nru libtommath-1.0.orig/Makefile libtommath-1.0/Makefile
+--- libtommath-1.0.orig/Makefile	1970-01-01 01:00:00.000000000 +0100
++++ libtommath-1.0/Makefile	2016-11-30 13:28:58.851779023 +0100
+@@ -0,0 +1,142 @@
++tommath_SRCS = bn_mp_reduce_2k_setup.c \
++bn_mp_sub_d.c \
++bn_error.c \
++bn_mp_lshd.c \
++bn_fast_s_mp_sqr.c \
++bn_mp_clamp.c \
++bn_mp_or.c \
++bn_reverse.c \
++bn_mp_radix_smap.c \
++bn_mp_count_bits.c \
++bn_mp_exch.c \
++bn_mp_init_set.c \
++bn_mp_rand.c \
++bn_mp_to_unsigned_bin_n.c \
++bn_mp_exptmod_fast.c \
++bn_mp_signed_bin_size.c \
++bn_mp_n_root.c \
++bn_mp_n_root_ex.c \
++bn_prime_tab.c \
++bn_mp_dr_setup.c \
++bn_mp_init.c \
++bn_mp_and.c \
++bncore.c \
++bn_s_mp_mul_high_digs.c \
++bn_mp_add.c \
++bn_mp_div_2d.c \
++bn_fast_mp_montgomery_reduce.c \
++bn_mp_copy.c \
++bn_mp_prime_is_divisible.c \
++bn_mp_mulmod.c \
++bn_mp_mul.c \
++bn_s_mp_mul_digs.c \
++bn_mp_get_int.c \
++bn_mp_sub.c \
++bn_mp_invmod.c \
++bn_mp_unsigned_bin_size.c \
++bn_mp_invmod_slow.c \
++bn_mp_montgomery_calc_normalization.c \
++bn_mp_cmp_d.c \
++bn_mp_cnt_lsb.c \
++bn_mp_jacobi.c \
++bn_s_mp_exptmod.c \
++bn_mp_submod.c \
++bn_mp_reduce_2k_setup_l.c \
++bn_mp_mod_2d.c \
++bn_mp_neg.c \
++bn_mp_dr_is_modulus.c \
++bn_mp_div_d.c \
++bn_mp_abs.c \
++bn_fast_s_mp_mul_digs.c \
++bn_mp_set_int.c \
++bn_mp_to_signed_bin_n.c \
++bn_mp_read_signed_bin.c \
++bn_mp_mul_2.c \
++bn_mp_div_2.c \
++bn_mp_div_3.c \
++bn_mp_reduce_2k_l.c \
++bn_mp_reduce_setup.c \
++bn_mp_radix_size.c \
++bn_mp_sqrt.c \
++bn_mp_init_set_int.c \
++bn_mp_zero.c \
++bn_mp_mod.c \
++bn_mp_to_unsigned_bin.c \
++bn_mp_is_square.c \
++bn_mp_cmp.c \
++bn_mp_set.c \
++bn_mp_2expt.c \
++bn_mp_reduce.c \
++bn_s_mp_sqr.c \
++bn_mp_toom_mul.c \
++bn_mp_addmod.c \
++bn_mp_toradix_n.c \
++bn_mp_gcd.c \
++bn_mp_toradix.c \
++bn_mp_init_copy.c \
++bn_mp_reduce_2k.c \
++bn_mp_add_d.c \
++bn_fast_s_mp_mul_high_digs.c \
++bn_mp_xor.c \
++bn_mp_shrink.c \
++bn_mp_read_radix.c \
++bn_mp_sqr.c \
++bn_mp_toom_sqr.c \
++bn_mp_clear_multi.c \
++bn_mp_prime_random_ex.c \
++bn_mp_read_unsigned_bin.c \
++bn_mp_mul_2d.c \
++bn_mp_dr_reduce.c \
++bn_s_mp_sub.c \
++bn_mp_grow.c \
++bn_mp_mul_d.c \
++bn_mp_mod_d.c \
++bn_mp_sqrmod.c \
++bn_mp_karatsuba_sqr.c \
++bn_fast_mp_invmod.c \
++bn_mp_init_multi.c \
++bn_mp_reduce_is_2k.c \
++bn_mp_lcm.c \
++bn_mp_div.c \
++bn_mp_rshd.c \
++bn_mp_cmp_mag.c \
++bn_mp_karatsuba_mul.c \
++bn_mp_expt_d.c \
++bn_mp_expt_d_ex.c \
++bn_mp_prime_is_prime.c \
++bn_mp_prime_miller_rabin.c \
++bn_mp_init_size.c \
++bn_mp_exteuclid.c \
++bn_mp_reduce_is_2k_l.c \
++bn_mp_clear.c \
++bn_mp_prime_fermat.c \
++bn_mp_prime_next_prime.c \
++bn_mp_to_signed_bin.c \
++bn_s_mp_add.c \
++bn_mp_exptmod.c \
++bn_mp_montgomery_reduce.c \
++bn_mp_montgomery_setup.c \
++bn_mp_prime_rabin_miller_trials.c \
++tommath_export.c
++
++
++EXTRA_CFLAGS += -I$(SUBDIRS)/ -I$(KERNEL_DIR)/include/linux -Wall $(TARGET_CFLAGS)
++
++TOMMATH_OBJECTS = $(tommath_SRCS:.c=.o) 
++
++tommath-y = $(TOMMATH_OBJECTS)
++
++obj-$(CONFIG_CRYPTO_TOMMATH) += tommath.o
++
++build:	
++	CROSS_COMPILE=$(CROSS_COMPILE) $(MAKE) ARCH=$(ARCH) V=1 -C $(KERNEL_DIR) SUBDIRS=`pwd` modules
++
++clean:
++	$(MAKE) -C $(KERNEL_DIR) SUBDIRS=`pwd` clean
++	$(MAKE) -C tests clean
++	$(MAKE) -C examples clean
++	$(MAKE) -C userspace clean
++	rm -f $(hostprogs)
++
++check:
++	KERNEL_DIR=$(KERNEL_DIR) $(MAKE) -C tests check
+diff -Nru libtommath-1.0.orig/bn_mp_div.c libtommath-1.0/bn_mp_div.c
+--- libtommath-1.0.orig/bn_mp_div.c	2016-11-29 11:38:38.000000000 +0100
++++ libtommath-1.0/bn_mp_div.c	2016-11-30 13:28:58.851779023 +0100
+@@ -195,7 +195,7 @@
+       mp_word tmp;
+       tmp = ((mp_word) x.dp[i]) << ((mp_word) DIGIT_BIT);
+       tmp |= ((mp_word) x.dp[i - 1]);
+-      tmp /= ((mp_word) y.dp[t]);
++      tmp = word_div_int(tmp, (int)y.dp[t]);
+       if (tmp > (mp_word) MP_MASK) {
+         tmp = MP_MASK;
+       }
+diff -Nru libtommath-1.0.orig/bn_mp_div_d.c libtommath-1.0/bn_mp_div_d.c
+--- libtommath-1.0.orig/bn_mp_div_d.c	2016-11-29 11:38:38.000000000 +0100
++++ libtommath-1.0/bn_mp_div_d.c	2016-11-30 13:28:58.851779023 +0100
+@@ -87,7 +87,7 @@
+      w = (w << ((mp_word)DIGIT_BIT)) | ((mp_word)a->dp[ix]);
+      
+      if (w >= b) {
+-        t = (mp_digit)(w / b);
++			t = (mp_digit) (word_div_int(w, b));
+         w -= ((mp_word)t) * ((mp_word)b);
+       } else {
+         t = 0;
+diff -Nru libtommath-1.0.orig/tommath.h libtommath-1.0/tommath.h
+--- libtommath-1.0.orig/tommath.h	2016-11-29 11:38:38.000000000 +0100
++++ libtommath-1.0/tommath.h	2016-11-30 13:30:44.535679365 +0100
+@@ -15,10 +15,33 @@
+ #ifndef BN_H_
+ #define BN_H_
+ 
++#ifdef __KERNEL__
++#include <linux/kernel.h>
++#include <linux/mm.h>
++#include <linux/slab.h>
++#include <linux/random.h>
++#include <linux/math64.h>
++#include <linux/limits.h>
++
++#define CHAR_BIT sizeof(uint8_t)*8
++#define RAND_MAX 0x7fffffff
++
++#define LTM_NO_FILE
++
++inline static int rand(void)
++{
++	int res;
++
++	get_random_bytes(&res, sizeof(int));
++
++	return res & RAND_MAX;
++}
++#else
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stdint.h>
+ #include <limits.h>
++#endif
+ 
+ #include <tommath_class.h>
+ 
+@@ -142,6 +165,9 @@
+            TOOM_SQR_CUTOFF;
+ 
+ /* define this to use lower memory usage routines (exptmods mostly) */
++#if defined(__KERNEL__)
++#define MP_LOW_MEM
++#endif
+ /* #define MP_LOW_MEM */
+ 
+ /* default precision */
+diff -Nru libtommath-1.0.orig/tommath_export.c libtommath-1.0/tommath_export.c
+--- libtommath-1.0.orig/tommath_export.c	1970-01-01 01:00:00.000000000 +0100
++++ libtommath-1.0/tommath_export.c	2016-11-30 13:28:58.852779042 +0100
+@@ -0,0 +1,101 @@
++#include <linux/module.h>
++#include "tommath.h"
++
++/* Export all symbols of tommath */
++EXPORT_SYMBOL(mp_error_to_string);
++EXPORT_SYMBOL(mp_init);
++EXPORT_SYMBOL(mp_clear);
++EXPORT_SYMBOL(mp_init_multi);
++EXPORT_SYMBOL(mp_clear_multi);
++EXPORT_SYMBOL(mp_exch);
++EXPORT_SYMBOL(mp_shrink);
++EXPORT_SYMBOL(mp_grow);
++EXPORT_SYMBOL(mp_init_size);
++EXPORT_SYMBOL(mp_zero);
++EXPORT_SYMBOL(mp_set);
++EXPORT_SYMBOL(mp_set_int);
++EXPORT_SYMBOL(mp_get_int);
++EXPORT_SYMBOL(mp_init_set);
++EXPORT_SYMBOL(mp_init_set_int);
++EXPORT_SYMBOL(mp_copy);
++EXPORT_SYMBOL(mp_init_copy);
++EXPORT_SYMBOL(mp_clamp);
++EXPORT_SYMBOL(mp_rshd);
++EXPORT_SYMBOL(mp_lshd);
++EXPORT_SYMBOL(mp_div_2d);
++EXPORT_SYMBOL(mp_div_2);
++EXPORT_SYMBOL(mp_mul_2d);
++EXPORT_SYMBOL(mp_mul_2);
++EXPORT_SYMBOL(mp_mod_2d);
++EXPORT_SYMBOL(mp_2expt);
++EXPORT_SYMBOL(mp_cnt_lsb);
++EXPORT_SYMBOL(mp_rand);
++EXPORT_SYMBOL(mp_xor);
++EXPORT_SYMBOL(mp_or);
++EXPORT_SYMBOL(mp_and);
++EXPORT_SYMBOL(mp_neg);
++EXPORT_SYMBOL(mp_abs);
++EXPORT_SYMBOL(mp_cmp);
++EXPORT_SYMBOL(mp_cmp_mag);
++EXPORT_SYMBOL(mp_add);
++EXPORT_SYMBOL(mp_sub);
++EXPORT_SYMBOL(mp_mul);
++EXPORT_SYMBOL(mp_sqr);
++EXPORT_SYMBOL(mp_div);
++EXPORT_SYMBOL(mp_mod);
++EXPORT_SYMBOL(mp_cmp_d);
++EXPORT_SYMBOL(mp_add_d);
++EXPORT_SYMBOL(mp_sub_d);
++EXPORT_SYMBOL(mp_mul_d);
++EXPORT_SYMBOL(mp_div_d);
++EXPORT_SYMBOL(mp_div_3);
++EXPORT_SYMBOL(mp_expt_d);
++EXPORT_SYMBOL(mp_mod_d);
++EXPORT_SYMBOL(mp_addmod);
++EXPORT_SYMBOL(mp_submod);
++EXPORT_SYMBOL(mp_mulmod);
++EXPORT_SYMBOL(mp_sqrmod);
++EXPORT_SYMBOL(mp_invmod);
++EXPORT_SYMBOL(mp_gcd);
++EXPORT_SYMBOL(mp_exteuclid);
++EXPORT_SYMBOL(mp_lcm);
++EXPORT_SYMBOL(mp_n_root);
++EXPORT_SYMBOL(mp_sqrt);
++EXPORT_SYMBOL(mp_is_square);
++EXPORT_SYMBOL(mp_jacobi);
++EXPORT_SYMBOL(mp_reduce_setup);
++EXPORT_SYMBOL(mp_reduce);
++EXPORT_SYMBOL(mp_montgomery_setup);
++EXPORT_SYMBOL(mp_montgomery_calc_normalization);
++EXPORT_SYMBOL(mp_montgomery_reduce);
++EXPORT_SYMBOL(mp_dr_is_modulus);
++EXPORT_SYMBOL(mp_dr_setup);
++EXPORT_SYMBOL(mp_dr_reduce);
++EXPORT_SYMBOL(mp_reduce_is_2k);
++EXPORT_SYMBOL(mp_reduce_2k_setup);
++EXPORT_SYMBOL(mp_reduce_2k);
++EXPORT_SYMBOL(mp_reduce_is_2k_l);
++EXPORT_SYMBOL(mp_reduce_2k_setup_l);
++EXPORT_SYMBOL(mp_reduce_2k_l);
++EXPORT_SYMBOL(mp_exptmod);
++EXPORT_SYMBOL(mp_prime_is_divisible);
++EXPORT_SYMBOL(mp_prime_fermat);
++EXPORT_SYMBOL(mp_prime_miller_rabin);
++EXPORT_SYMBOL(mp_prime_rabin_miller_trials);
++EXPORT_SYMBOL(mp_prime_is_prime);
++EXPORT_SYMBOL(mp_prime_next_prime);
++EXPORT_SYMBOL(mp_prime_random_ex);
++EXPORT_SYMBOL(mp_count_bits);
++EXPORT_SYMBOL(mp_unsigned_bin_size);
++EXPORT_SYMBOL(mp_read_unsigned_bin);
++EXPORT_SYMBOL(mp_to_unsigned_bin);
++EXPORT_SYMBOL(mp_to_unsigned_bin_n);
++EXPORT_SYMBOL(mp_signed_bin_size);
++EXPORT_SYMBOL(mp_read_signed_bin);
++EXPORT_SYMBOL(mp_to_signed_bin);
++EXPORT_SYMBOL(mp_to_signed_bin_n);
++EXPORT_SYMBOL(mp_read_radix);
++EXPORT_SYMBOL(mp_toradix);
++EXPORT_SYMBOL(mp_toradix_n);
++EXPORT_SYMBOL(mp_radix_size);
++
+diff -Nru libtommath-1.0.orig/tommath_private.h libtommath-1.0/tommath_private.h
+--- libtommath-1.0.orig/tommath_private.h	2016-11-29 11:38:38.000000000 +0100
++++ libtommath-1.0/tommath_private.h	2016-11-30 13:28:58.852779042 +0100
+@@ -16,7 +16,11 @@
+ #define TOMMATH_PRIV_H_
+ 
+ #include <tommath.h>
++#ifdef __KERNEL__
++#include <linux/ctype.h>
++#else
+ #include <ctype.h>
++#endif
+ 
+ #define MIN(x,y) (((x) < (y)) ? (x) : (y))
+ 
+@@ -35,7 +39,21 @@
+ 
+ #endif
+ 
++#if defined(__KERNEL__)
++#define word_div_int(x,y) div_u64((x),(y))
++#else
++#define word_div_int(x,y) ((x)/(y))
++#endif
++
+ /* define heap macros */
++#if defined(__KERNEL__)
++#ifndef XMALLOC
++#define XMALLOC(x) kmalloc(x, GFP_KERNEL)
++#define XFREE kfree
++#define XREALLOC(x,y) krealloc(x,y, GFP_KERNEL)
++#define XCALLOC(x,y) kzalloc(x*y, GPF_KERNEL)
++#endif
++#else
+ #ifndef XMALLOC
+    /* default to libc stuff */
+    #define XMALLOC  malloc
+@@ -49,6 +67,7 @@
+    extern void *XCALLOC(size_t n, size_t s);
+    extern void XFREE(void *p);
+ #endif
++#endif
+ 
+ /* lowlevel functions, do not call! */
+ int s_mp_add(mp_int *a, mp_int *b, mp_int *c);

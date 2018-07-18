@@ -1,0 +1,140 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+
+BRCTL_BIN=/usr/bin/brctl
+MCPD_BIN=/usr/bin/mcpd
+MCPD_CONF=/var/mcpd.conf
+MCPD_PID=/var/run/mcpd.pid
+
+start() {
+	logger -t snooping "Starting igmp/mld snooping"
+
+	mcpd_daemon_stop
+
+	UCI_load_and_apply igmpsnooping_bridge_config
+
+	mcpd_daemon_config_update
+	[ "$IGMP_SNOOPING_INTERFACES" ] && mcpd_daemon_start
+
+	return 0
+}
+
+stop() {
+	logger -t igmpsnooping "Stopping igmp/mld snooping"
+
+	UCI_load_and_apply igmpsnooping_bridge_reset
+
+	mcpd_daemon_stop
+
+	return 0
+}
+
+UCI_load_and_apply() {
+	config_load igmpsnooping
+	config_foreach $1 bridge
+}
+
+UCI_get_brname() {
+	echo $(uci get -P /var/state network.$1.ifname)
+}
+
+igmpsnooping_bridge_config() {
+	local brname enabled flooding mode
+
+	brname=$(UCI_get_brname $1)
+	[ "$brname" ] || return
+
+	config_get enabled $1 enabled
+	config_get flooding $1 flooding
+
+	if [ "$enabled" == 1 ]; then
+	  mode=$((flooding == 1 ? 1 : 2))
+	  IGMP_SNOOPING_INTERFACES="$IGMP_SNOOPING_INTERFACES $brname"
+	else
+	  mode=0
+	fi
+
+	igmpsnooping_bridge_set $brname $mode
+}
+
+igmpsnooping_bridge_reset() {
+	local brname
+
+	brname=$(UCI_get_brname $1)
+	[ "$brname" ] || return
+
+	igmpsnooping_bridge_set $brname 0
+}
+
+igmpsnooping_bridge_set()
+{
+	echo "Setting snooping mode $2 for bridge '$1'"
+	$BRCTL_BIN enableportsnooping $1 $2
+}
+
+mcpd_daemon_config_update() {
+	rm -f ${MCPD_CONF}
+	mcpd_daemon_write_igmp_config >> ${MCPD_CONF}
+	mcpd_daemon_write_mld_config >> ${MCPD_CONF}
+}
+
+mcpd_daemon_write_igmp_config() {
+	cat << EOF
+#
+#Begin IGMP configuration
+#
+igmp-default-version 3
+igmp-query-interval 20
+igmp-query-response-interval 10
+igmp-last-member-query-interval 10
+igmp-robustness-value 2
+igmp-lan-to-lan-multicast enable
+igmp-max-groups 10
+igmp-max-sources 10
+igmp-max-members 10
+igmp-fast-leave 1
+igmp-proxy-interfaces
+igmp-snooping-interfaces $IGMP_SNOOPING_INTERFACES
+igmp-mcast-interfaces
+#
+#End IGMP configuration
+#
+EOF
+}
+
+mcpd_daemon_write_mld_config() {
+	cat << EOF
+#
+#Begin MLD configuration
+#
+mld-default-version 2
+mld-query-interval 125
+mld-query-response-interval 10
+mld-last-member-query-interval 10
+mld-robustness-value 2
+mld-lan-to-lan-multicast enable
+mld-max-groups 10
+mld-max-sources 10
+mld-max-members 10
+mld-fast-leave 1
+mld-proxy-interfaces
+mld-snooping-interfaces
+mld-mcast-interfaces
+#
+#End MLD configuration
+#
+EOF
+}
+
+mcpd_daemon_start() {
+	echo "Starting daemon [mpcd]"
+        start-stop-daemon -S -x $MCPD_BIN -p $MCPD_PID -m -b
+}
+
+mcpd_daemon_stop() {
+	[ -e $MCPD_PID ] || return
+	echo "Stopping daemon [mpcd]"
+        start-stop-daemon -K -x $MCPD_BIN -p $MCPD_PID -s TERM
+        rm -f $MCPD_PID
+}

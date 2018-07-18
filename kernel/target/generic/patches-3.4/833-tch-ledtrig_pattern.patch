@@ -1,0 +1,303 @@
+From afac37120b6977b9da2b4f5508174a9e5b04a657 Mon Sep 17 00:00:00 2001
+From: Karl Vogel <karl.vogel@technicolor.com>
+Date: Wed, 31 Jul 2013 14:32:38 +0200
+Subject: [PATCH] [US10619] Pattern LED trigger
+
+---
+ drivers/leds/Kconfig           |    4 +
+ drivers/leds/Makefile          |    1 +
+ drivers/leds/ledtrig-pattern.c |  237 +++++++++++++++++++++
+ 3 files changed, 242 insertions(+), 0 deletions(-)
+ create mode 100644 drivers/leds/ledtrig-pattern.c
+
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -411,6 +411,10 @@ config LEDS_TRIGGERS
+ 
+ comment "LED Triggers"
+ 
++config LEDS_TRIGGER_PATTERN
++	tristate "LED Pattern Trigger"
++	depends on LEDS_TRIGGERS
++
+ config LEDS_TRIGGER_TIMER
+ 	tristate "LED Timer Trigger"
+ 	depends on LEDS_TRIGGERS
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -51,6 +51,7 @@ obj-$(CONFIG_LEDS_DAC124S085)		+= leds-d
+ 
+ # LED Triggers
+ obj-$(CONFIG_LEDS_TRIGGER_TIMER)	+= ledtrig-timer.o
++obj-$(CONFIG_LEDS_TRIGGER_PATTERN)	+= ledtrig-pattern.o
+ obj-$(CONFIG_LEDS_TRIGGER_IDE_DISK)	+= ledtrig-ide-disk.o
+ obj-$(CONFIG_LEDS_TRIGGER_HEARTBEAT)	+= ledtrig-heartbeat.o
+ obj-$(CONFIG_LEDS_TRIGGER_BACKLIGHT)	+= ledtrig-backlight.o
+--- /dev/null
++++ b/drivers/leds/ledtrig-pattern.c
+@@ -0,0 +1,265 @@
++/*
++ *  pattern Led Trigger
++ *
++ *  Copyright (C) 2013 Technicolor <linuxgw@technicolor.com>
++ *
++ *  This file was based on: drivers/led/ledtrig-timer.c
++ *	Copyright 2005-2006 Openedhand Ltd.
++ *	Author: Richard Purdie <rpurdie@openedhand.com>
++ *
++ *  This program is free software; you can redistribute it and/or modify it
++ *  under the terms of the GNU General Public License version 2 as published
++ *  by the Free Software Foundation.
++ *
++ */
++
++#include <linux/kernel.h>
++#include <linux/version.h>
++#include <linux/module.h>
++#include <linux/jiffies.h>
++#include <linux/init.h>
++#include <linux/list.h>
++#include <linux/spinlock.h>
++#include <linux/device.h>
++#include <linux/timer.h>
++#include <linux/ctype.h>
++#include <linux/leds.h>
++#include <linux/slab.h>
++
++#include "leds.h"
++
++struct pattern_trig_data {
++	rwlock_t lock;
++
++	struct timer_list timer;
++	unsigned long delay;
++	char *msg;
++	char *msgpos;
++};
++
++static void pattern_timer_function(unsigned long data)
++{
++	struct led_classdev *led_cdev = (struct led_classdev *)data;
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++	unsigned long brightness = LED_OFF;
++
++	write_lock_bh(&pattern_data->lock);
++
++	if (!pattern_data->msg)
++		goto set_led;
++
++	if (pattern_data->msgpos == NULL || *pattern_data->msgpos == 0)
++		pattern_data->msgpos = pattern_data->msg;
++
++	brightness = *pattern_data->msgpos == '0' ? 0 : 100;
++	pattern_data->msgpos++;
++
++	mod_timer(&pattern_data->timer, jiffies + msecs_to_jiffies(pattern_data->delay));
++
++set_led:
++	led_set_brightness(led_cdev, brightness);
++
++	write_unlock_bh(&pattern_data->lock);
++
++}
++
++static ssize_t _pattern_msg_show(struct led_classdev *led_cdev, char *buf)
++{
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++
++	read_lock_bh(&pattern_data->lock);
++	if (!pattern_data->msg)
++		sprintf(buf, "<none>\n");
++	else
++		sprintf(buf, "%s\n", pattern_data->msg);
++	read_unlock_bh(&pattern_data->lock);
++
++	return strlen(buf);
++}
++
++static ssize_t _pattern_msg_store(struct led_classdev *led_cdev,
++		const char *buf, size_t size)
++{
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++	char *m;
++
++	if (!size)
++		return -EINVAL;
++
++	m = kmalloc(size+1, GFP_KERNEL);
++	if (!m)
++		return -ENOMEM;
++
++	memcpy(m,buf,size);
++	m[size]='\0';
++
++	write_lock_bh(&pattern_data->lock);
++
++	if (pattern_data->msg)
++		kfree(pattern_data->msg);
++
++	pattern_data->msg = m;
++	pattern_data->msgpos = NULL;
++
++	mod_timer(&pattern_data->timer, jiffies + 1);
++
++	write_unlock_bh(&pattern_data->lock);
++
++	return size;
++}
++
++static ssize_t _pattern_delay_show(struct led_classdev *led_cdev, char *buf)
++{
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++	int len;
++
++	read_lock_bh(&pattern_data->lock);
++	len = sprintf(buf, "%lu\n", pattern_data->delay);
++	read_unlock_bh(&pattern_data->lock);
++	return len;
++}
++
++static ssize_t _pattern_delay_store(struct led_classdev *led_cdev,
++		const char *buf, size_t size)
++{
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++	char *after;
++	unsigned long delay = simple_strtoul(buf, &after, 10);
++	size_t count = after - buf;
++	int ret = -EINVAL;
++
++	write_lock_bh(&pattern_data->lock);
++
++	if (*after && isspace(*after))
++		count++;
++
++	if (count == size) {
++		/* clamp delay */
++		if (delay < 50)
++			delay = 50;
++		else if (delay > 10*HZ)
++			delay = 10* HZ;
++		pattern_data->delay = delay;
++		mod_timer(&pattern_data->timer, jiffies + 1);
++		ret = count;
++	}
++
++	write_unlock_bh(&pattern_data->lock);
++
++	return ret;
++}
++
++static ssize_t pattern_delay_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++
++	return _pattern_delay_show(led_cdev, buf);
++}
++
++static ssize_t pattern_delay_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++
++	return _pattern_delay_store(led_cdev, buf, size);
++}
++
++static ssize_t pattern_msg_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++
++	return _pattern_msg_show(led_cdev, buf);
++}
++
++static ssize_t pattern_msg_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++
++	return _pattern_msg_store(led_cdev, buf, size);
++}
++
++static DEVICE_ATTR(delay, 0644, pattern_delay_show, pattern_delay_store);
++static DEVICE_ATTR(message, 0644, pattern_msg_show, pattern_msg_store);
++#define led_device_create_file(leddev, attr) \
++	device_create_file(leddev->dev, &dev_attr_ ## attr)
++#define led_device_remove_file(leddev, attr) \
++	device_remove_file(leddev->dev, &dev_attr_ ## attr)
++
++static void pattern_trig_activate(struct led_classdev *led_cdev)
++{
++	struct pattern_trig_data *pattern_data;
++	int rc;
++
++	pattern_data = kzalloc(sizeof(struct pattern_trig_data), GFP_KERNEL);
++	if (!pattern_data)
++		return;
++
++	rwlock_init(&pattern_data->lock);
++
++	init_timer(&pattern_data->timer);
++	pattern_data->delay = 1000;
++	pattern_data->timer.function = pattern_timer_function;
++	pattern_data->timer.data = (unsigned long)led_cdev;
++
++	rc = led_device_create_file(led_cdev, delay);
++	if (rc) goto err;
++
++	rc = led_device_create_file(led_cdev, message);
++	if (rc) goto err_delay;
++
++
++	led_cdev->trigger_data = pattern_data;
++	return;
++
++err_delay:
++	led_device_remove_file(led_cdev, delay);
++err:
++	kfree(pattern_data);
++}
++
++static void pattern_trig_deactivate(struct led_classdev *led_cdev)
++{
++	struct pattern_trig_data *pattern_data = led_cdev->trigger_data;
++
++	if (!pattern_data)
++		return;
++
++	led_device_remove_file(led_cdev, message);
++	led_device_remove_file(led_cdev, delay);
++
++	write_lock_bh(&pattern_data->lock);
++
++	del_timer_sync(&pattern_data->timer);
++	if (pattern_data->msg)
++		kfree(pattern_data->msg);
++
++	write_unlock_bh(&pattern_data->lock);
++
++	kfree(pattern_data);
++}
++
++static struct led_trigger pattern_led_trigger = {
++	.name		= "pattern",
++	.activate	= pattern_trig_activate,
++	.deactivate	= pattern_trig_deactivate,
++};
++
++static int __init pattern_trig_init(void)
++{
++	return led_trigger_register(&pattern_led_trigger);
++}
++
++static void __exit pattern_trig_exit(void)
++{
++	led_trigger_unregister(&pattern_led_trigger);
++}
++
++module_init(pattern_trig_init);
++module_exit(pattern_trig_exit);
++
++MODULE_AUTHOR("Technicolor <linuxgw@technicolor.com");
++MODULE_DESCRIPTION("pattern LED trigger");
++MODULE_LICENSE("GPL v2");

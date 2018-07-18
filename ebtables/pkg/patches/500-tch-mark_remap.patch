@@ -1,0 +1,220 @@
+--- a/extensions/Makefile
++++ b/extensions/Makefile
+@@ -1,7 +1,7 @@
+ #! /usr/bin/make
+ 
+ EXT_FUNC+=802_3 nat arp arpreply ip ip6 standard log redirect vlan mark_m mark \
+-          pkttype stp among limit ulog nflog
++          pkttype stp among limit ulog nflog mark_remap
+ EXT_TABLES+=filter nat broute
+ EXT_OBJS+=$(foreach T,$(EXT_FUNC), extensions/ebt_$(T).o)
+ EXT_OBJS+=$(foreach T,$(EXT_TABLES), extensions/ebtable_$(T).o)
+--- /dev/null
++++ b/extensions/ebt_mark_remap.c
+@@ -0,0 +1,163 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <getopt.h>
++#include "../include/ebtables_u.h"
++#include "../include/linux/netfilter_bridge/ebt_mark_remap.h"
++
++static int mark_supplied;
++
++#define MARK_REMAP_INPUT   '1'
++#define MARK_REMAP_OUTPUT  '2'
++#define MARK_REMAP_MAPPING '3'
++
++static struct option opts[] =
++{
++	{ "input"  , required_argument, 0, MARK_REMAP_INPUT },
++	{ "output" , required_argument, 0, MARK_REMAP_OUTPUT },
++	{ "mapping", required_argument, 0, MARK_REMAP_MAPPING },
++	{ 0 }
++};
++
++static void print_help()
++{
++	printf(
++	"mark_remap target options:\n"
++	"  --input bitmask     : Mask to use as input\n"
++	"  --output bitmask    : Mask to use as output\n"
++	"  --mapping a,b,c,... : Comma separated list of mapped values\n");
++}
++
++static void init(struct ebt_entry_target *target)
++{
++	struct xt_mark_remap_tginfo *info = (struct xt_mark_remap_tginfo *)target->data;
++
++	memset(info, 0, sizeof(*info));
++}
++
++static int mark_remap_tg_parse_mapping(char * input, __u16 * mapping) {
++	int i = 0;
++	while (*input && i < MAX_INPUT_VALUES) {
++		mapping[i] = strtol(input, &input, 10);
++		if (*input == ',') {
++			input++;
++		}
++		else if (*input != 0) {
++			ebt_print_error2("Parsing error");
++		}
++		i++;
++	}
++	return 1;
++}
++
++static int mark_remap_tg_parse_bitspec(char * input, __u32 * mask, __u8 * shift, __u32 * max) {
++	*mask = strtol(input, &input, 16);
++
++	if (*mask == 0) {
++		ebt_print_error2("Mask 0x%x not supported", *mask);
++	}
++
++	// Determine shift automatically
++	*shift = 0;
++	while (!(*mask & (1 << *shift))) {
++		(*shift)++;
++	}
++
++	// Determine max size automatically
++	*max = (*mask >> *shift) + 1;
++
++	// Forbid masks with holes
++	if (*max & (*max - 1)) {
++		ebt_print_error2("Mask 0x%x contains one or more holes", *mask);
++	}
++	return 1;
++}
++
++static int parse(int c, char **argv, int argc,
++   const struct ebt_u_entry *entry, unsigned int *flags,
++   struct ebt_entry_target **target)
++{
++	struct xt_mark_remap_tginfo *info =
++	   (struct xt_mark_remap_tginfo *)(*target)->data;
++	int ret = 0;
++	char *end;
++
++	switch (c) {
++	case MARK_REMAP_INPUT:
++		ret = mark_remap_tg_parse_bitspec(optarg, &info->input_mask, &info->input_shift, &info->input_max);
++		if (info->input_max > MAX_INPUT_VALUES){
++			ebt_print_error2("Mask 0x%x has more than %d options", info->input_mask, MAX_INPUT_VALUES);
++		}
++		break;
++	case MARK_REMAP_OUTPUT:
++		ret = mark_remap_tg_parse_bitspec(optarg, &info->output_mask, &info->output_shift, &info->output_max);
++		break;
++	case MARK_REMAP_MAPPING:
++		ret = mark_remap_tg_parse_mapping(optarg, info->mapping);
++		break;
++	}
++
++	return ret;
++}
++
++static void final_check(const struct ebt_u_entry *entry,
++   const struct ebt_entry_target *target, const char *name,
++   unsigned int hookmask, unsigned int time)
++{
++	struct xt_mark_remap_tginfo *info = (void *)target->data;
++	int i;
++
++	for (i = 0; i < info->input_max; i++) {
++	   if (info->mapping[i] >= info->output_max) {
++		  ebt_print_error("Output value %u doesn't fit output mask 0x%x", info->mapping[i], info->output_mask);
++	   }
++	   info->mapbits[i] = info->mapping[i] << info->output_shift;
++	}
++}
++
++static void print(const struct ebt_u_entry *entry,
++   const struct ebt_entry_target *target)
++{
++	const struct xt_mark_remap_tginfo *info = (const void *)target->data;
++	int i;
++
++	printf(" --input 0x%x --output 0x%x ", info->input_mask, info->output_mask);
++
++	printf("--mapping ");
++	for (i = 0; i < info->input_max; i++) {
++		if (i > 0) printf(",");
++		printf("%d", info->mapping[i]);
++	}
++
++}
++
++static int compare(const struct ebt_entry_target *t1,
++   const struct ebt_entry_target *t2)
++{
++	struct xt_mark_remap_tginfo *info1 =
++	   (struct xt_mark_remap_tginfo *)t1->data;
++	struct xt_mark_remap_tginfo *info2 =
++	   (struct xt_mark_remap_tginfo *)t2->data;
++
++	return (info1->input_mask == info2->input_mask) &&
++	   (info2->output_mask == info2->output_mask) &&
++	   memcmp(info1->mapping, info2->mapping, sizeof(info1->mapping)) == 0;
++}
++
++static struct ebt_u_target mark_remap_target =
++{
++	.name		= "mark_remap",
++	.size		= sizeof(struct xt_mark_remap_tginfo),
++	.help		= print_help,
++	.init		= init,
++	.parse		= parse,
++	.final_check	= final_check,
++	.print		= print,
++	.compare	= compare,
++	.extra_ops	= opts,
++};
++
++__attribute__((constructor)) extension_init(void)
++{
++	ebt_register_target(&mark_remap_target);
++}
+--- /dev/null
++++ b/include/linux/netfilter_bridge/ebt_mark_remap.h
+@@ -0,0 +1,40 @@
++/********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
++**                                                                      **
++** Copyright (c) 2015  -  Technicolor Delivery Technologies, SAS        **
++** - All Rights Reserved                                                **
++**                                                                      **
++** Technicolor hereby informs you that certain portions                 **
++** of this software module and/or Work are owned by Technicolor         **
++** and/or its software providers.                                       **
++**                                                                      **
++** Distribution copying and modification of all such work are reserved  **
++** to Technicolor and/or its affiliates, and are not permitted without  **
++** express written authorization from Technicolor.                      **
++**                                                                      **
++** Technicolor is registered trademark and trade name of Technicolor,   **
++** and shall not be used in any manner without express written          **
++** authorization from Technicolor                                       **
++**                                                                      **
++*************************************************************************/
++
++
++#ifndef _XT_MARK_REMAP_H
++#define _XT_MARK_REMAP_H
++
++#define MAX_INPUT_VALUES  32
++
++#include <linux/types.h>
++
++struct xt_mark_remap_tginfo {
++  __u32 input_mask;
++  __u8 input_shift;
++  __u32 input_max;
++  __u32 output_mask;
++  __u8 output_shift;
++  __u32 output_max;
++
++  __u16 mapping[MAX_INPUT_VALUES];
++  __u32 mapbits[MAX_INPUT_VALUES];
++};
++
++#endif /*_XT_MARK_REMAP_H*/

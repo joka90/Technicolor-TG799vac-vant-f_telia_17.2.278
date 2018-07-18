@@ -1,0 +1,4 @@
+Source: uci-2016-07-04.1.tar.gz
+Source-Url: http://git.openwrt.org/project/uci.git
+Source-Version: e1bf4356e1b513e158e1b5049147087ed6342cfd
+Source-Proto: 

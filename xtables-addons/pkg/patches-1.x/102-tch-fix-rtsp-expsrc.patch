@@ -1,0 +1,188 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -15,6 +15,9 @@
+  *	- codestyle fixes and other less significant bug fixes 
+  * 2014-02-25: Alin Nastac <alin.nastac at technicolor.com>
+  *      - use IP address read from SETUP URI in expected connections
++ * 2015-04-16: Fan Wei <wei.fan@technicolor.com>, Tan Xiu Juan <xiujuan.tan@technicolor.com>
++ *  - update the rtsp exp-connt's src IP
++ *  - if it's updated in the REPLY message
+  *
+  * based on ip_conntrack_irc.c
+  *
+@@ -45,6 +48,7 @@
+ #include <net/netfilter/nf_conntrack.h>
+ #include <net/netfilter/nf_conntrack_expect.h>
+ #include <net/netfilter/nf_conntrack_helper.h>
++#include <net/netfilter/nf_conntrack_zones.h>
+ #include "nf_conntrack_rtsp.h"
+ 
+ #define NF_NEED_STRNCASECMP
+@@ -248,6 +252,22 @@ rtsp_parse_transport(char* ptran, uint t
+ 				}
+ 			}
+ 			
++			else if (strncmp(ptran+off, "source=", 7) == 0) {
++				char szsrcaddr[INET6_ADDRSTRLEN] = {0}; /* Ensure the string can accommodate both IPv4 and IPv6 addr string */
++				uint srcaddrlen = 0;
++
++				off += 7;
++				srcaddrlen = nextfieldoff-off-1;
++
++				memcpy(szsrcaddr, ptran+off, srcaddrlen);
++				pr_info("source found : %s\n", szsrcaddr);
++
++				if (memchr(szsrcaddr, ':', srcaddrlen))
++					in6_pton(szsrcaddr, srcaddrlen, (u8 *)&(prtspexp->srvaddr).in6, -1, NULL);
++				else
++					in4_pton(szsrcaddr, srcaddrlen, (u8 *)&(prtspexp->srvaddr).in, -1, NULL);
++			}
++
+ 			/*
+ 			 * Note we don't look for the destination parameter here.
+ 			 * If we are using NAT, the NAT module will handle it.  If not,
+@@ -443,11 +463,118 @@ out:
+ }
+ 
+ 
++/* inbound packet: server->client */
++
+ static inline int
+-help_in(struct sk_buff *skb, size_t pktlen,
+-	struct nf_conn* ct, enum ip_conntrack_info ctinfo)
++help_in(struct sk_buff *skb, unsigned char *rb_ptr, unsigned int datalen,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0)
++	 struct nf_conn *ct, enum ip_conntrack_info ctinfo,
++	 unsigned int protoff)
++#else
++	 struct nf_conn *ct, enum ip_conntrack_info ctinfo)
++#endif
+ {
+-	return NF_ACCEPT;
++	struct ip_ct_rtsp_expect expinfo;
++	union nf_inet_addr srvaddr;
++	int dir = CTINFO2DIR(ctinfo);   /* = IP_CT_DIR_ORIGINAL */
++	int len;
++	char*   pdata = rb_ptr;
++	uint    dataoff = 0;
++	int ret = NF_ACCEPT;
++	u_int8_t family;
++	struct nf_conntrack_expect *exp_ct = NULL;
++	struct nf_conntrack_tuple t;
++	struct net *net = nf_ct_net(ct);
++
++	memset(&expinfo, 0x00, sizeof(expinfo));
++
++	while (dataoff < datalen) {
++		uint cmdoff = dataoff;
++		uint hdrsoff = 0;
++		uint hdrslen = 0;
++		uint cseqoff = 0;
++		uint cseqlen = 0;
++		uint transoff = 0;
++		uint translen = 0;
++
++		if (!rtsp_parse_message(pdata, datalen, &dataoff,
++					&hdrsoff, &hdrslen,
++					&cseqoff, &cseqlen,
++					&transoff, &translen))
++			break;      /* not a valid message */
++
++		if (strncmp(pdata+cmdoff, "RTSP/", 5) == 0 && translen) {
++			union nf_inet_addr emptaddr;
++
++			memset((void *)&emptaddr, 0x00, sizeof(emptaddr));
++
++			rtsp_parse_transport(pdata+transoff, translen, &expinfo);
++			srvaddr = expinfo.srvaddr;
++
++			if (nf_inet_addr_cmp(&srvaddr, &ct->tuplehash[dir].tuple.src.u3) ||
++					(nf_inet_addr_cmp(&srvaddr, &emptaddr)))
++				continue;
++		} else
++			continue;  /* not valid RTSP reply */
++
++		if (expinfo.loport == 0) {
++			pr_debug("no udp transports found\n");
++			continue;   /* no udp transports found */
++		}
++
++		family = nf_ct_l3num(ct);
++		if (family == AF_INET)
++			len = 4;
++		else
++			len = 16;
++
++		/*replace rtp expect src addr*/
++		t.src.l3num = family;
++		t.dst.protonum = IPPROTO_UDP;
++
++		memcpy(&t.src.u3, &ct->tuplehash[dir].tuple.src.u3, len);
++		if (sizeof(t.src.u3) > len)
++			/* address needs to be cleared for nf_ct_tuple_equal */
++			memset((void *)&t.src.u3 + len, 0x00, sizeof(t.src.u3) - len);
++
++		t.src.u.all = 0;
++
++		memcpy(&t.dst.u3, &ct->tuplehash[dir].tuple.dst.u3, len);
++		if (sizeof(t.dst.u3) > len)
++			/* address needs to be cleared for nf_ct_tuple_equal */
++			memset((void *)&t.dst.u3 + len, 0x00, sizeof(t.dst.u3) - len);
++
++		t.dst.u.all = htons(expinfo.loport);
++
++		/* get the rtp expect and replace the srcaddr with RTP server addr */
++		exp_ct = nf_ct_expect_find_get(net, nf_ct_zone(ct), &t);
++		if (exp_ct) {
++			memcpy(&exp_ct->tuple.src.u3, &srvaddr, len);
++			if (sizeof(exp_ct->tuple.src.u3) > len)
++				/* address needs to be cleared for nf_ct_tuple_equal */
++				memset((void *)&exp_ct->tuple.src.u3 + len, 0x00, sizeof(exp_ct->tuple.src.u3) - len);
++		} else
++			goto out;
++
++		/*replace rtcp expect src addr*/
++		if (expinfo.pbtype == pb_range) {
++			t.dst.u.all = htons(expinfo.hiport);
++
++			/* get the rtcp expect and replace the srcaddr with RTP server addr */
++			exp_ct = nf_ct_expect_find_get(net, nf_ct_zone(ct), &t);
++			if (exp_ct) {
++				memcpy(&exp_ct->tuple.src.u3, &srvaddr, len);
++				if (sizeof(exp_ct->tuple.src.u3) > len)
++					/* address needs to be cleared for nf_ct_tuple_equal */
++					memset((void *)&exp_ct->tuple.src.u3 + len, 0x00, sizeof(exp_ct->tuple.src.u3) - len);
++			} else
++				goto out;
++		}
++
++		goto out;
++	}
++out:
++	return ret;
+ }
+ 
+ static int help(struct sk_buff *skb, unsigned int protoff,
+@@ -505,7 +632,11 @@ static int help(struct sk_buff *skb, uns
+ 	case IP_CT_DIR_REPLY:
+ 		pr_debug("IP_CT_DIR_REPLY\n");
+ 		/* inbound packet: server->client */
+-		ret = NF_ACCEPT;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0)
++		ret = help_in(skb, rb_ptr, datalen, ct, ctinfo, protoff);
++#else
++		ret = help_in(skb, rb_ptr, datalen, ct, ctinfo);
++#endif
+ 		break;
+ 	}
+ 
+--- a/extensions/rtsp/nf_conntrack_rtsp.h
++++ b/extensions/rtsp/nf_conntrack_rtsp.h
+@@ -52,6 +52,7 @@ struct ip_ct_rtsp_expect
+     uint        method;     /* RTSP method */
+     uint        cseq;       /* CSeq from request */
+ #endif
++    union nf_inet_addr srvaddr; /* src address in SETUP reply */
+ };
+ 
+ extern unsigned int (*nf_nat_rtsp_hook)(struct sk_buff *skb,

@@ -1,0 +1,169 @@
+--- a/source/lib/fsusage.c
++++ b/source/lib/fsusage.c
+@@ -20,6 +20,114 @@
+ 
+ #include "includes.h"
+ 
++struct globals {
++	int slink_depth;
++	int du_depth;
++	SMB_BIG_UINT total_blocks;
++};
++
++static struct globals G = {.total_blocks = 0};
++
++
++#define DOT_OR_DOTDOT(s) ((s)[0] == '.' && (!(s)[1] || ((s)[1] == '.' && !(s)[2])))
++
++static char*  last_char_is(const char *s, int c)
++{
++	if (s && *s) {
++		size_t sz = strlen(s) - 1;
++		s += sz;
++		if ( (unsigned char)*s == c)
++			return (char*)s;
++	}
++	return NULL;
++}
++
++static char*  xasprintf(const char *format, ...)
++{
++	va_list p;
++	int r;
++	char *string_ptr;
++
++	va_start(p, format);
++	r = vasprintf(&string_ptr, format, p);
++	va_end(p);
++
++	if (r < 0)
++		return NULL;
++	return string_ptr;
++}
++
++
++static char* concat_path_file(const char *path, const char *filename)
++{
++	char *lc;
++
++	if (!path)
++		path = "";
++	lc = last_char_is(path, '/');
++	while (*filename == '/')
++		filename++;
++	return xasprintf("%s%s%s", path, (lc==NULL ? "/" : ""), filename);
++}
++
++
++static char*  concat_subpath_file(const char *path, const char *f)
++{
++	if (f && DOT_OR_DOTDOT(f))
++		return NULL;
++	return concat_path_file(path, f);
++}
++
++/* tiny recursive du */
++static SMB_BIG_UINT du(const char *filename)
++{
++	struct stat statbuf;
++	SMB_BIG_UINT sum;
++
++	if (lstat(filename, &statbuf) != 0) {
++		return 0;
++	}
++
++	sum = statbuf.st_blocks;
++
++	if (S_ISLNK(statbuf.st_mode)) {
++		if (G.slink_depth > G.du_depth) { /* -H or -L */
++			if (stat(filename, &statbuf) != 0) {
++				return 0;
++			}
++			sum = statbuf.st_blocks;
++			if (G.slink_depth == 1) {
++				/* Convert -H to -L */
++				G.slink_depth = INT_MAX;
++			}
++		}
++	}
++
++	if (S_ISDIR(statbuf.st_mode)) {
++		DIR *dir;
++		struct dirent *entry;
++		char *newfile;
++
++		dir = opendir(filename);
++		if (!dir) {
++			return sum;
++		}
++
++		while ((entry = readdir(dir))) {
++			newfile = concat_subpath_file(filename, entry->d_name);
++			if (newfile == NULL)
++				continue;
++			++G.du_depth;
++			sum += du(newfile);
++			--G.du_depth;
++			free(newfile);
++		}
++		closedir(dir);
++	}
++
++
++	return sum;
++}
+ 
+ /* Return the result of executed command,
+  * here the result is a number.
+@@ -65,6 +173,24 @@ static SMB_BIG_UINT adjust_blocks(SMB_BIG_UINT blocks, SMB_BIG_UINT fromsize, SM
+ 	}
+ }
+ 
++
++static void init_G()
++{
++		G.slink_depth = 0;
++		G.du_depth = 0;
++	
++	if (G.total_blocks == 0) {
++			G.total_blocks = cal_size("total=`/bin/mount | grep 'tmpfs on /tmp' | cut -d '=' -f 2 | cut -d ',' -f 1`; let total=$total/1024; echo $total");
++	}
++
++	if (G.total_blocks == 0) {
++		/* default tmpfs size is half of total memory size */
++		G.total_blocks = cal_size("cat /proc/meminfo  | grep MemTotal | awk '{print $2}'");
++		G.total_blocks /= 2;
++	}
++}
++
++
+ /* this does all of the system specific guff to get the free disk space.
+    It is derived from code in the GNU fileutils package, but has been
+    considerably mangled for use here 
+@@ -80,6 +206,7 @@ int sys_fsusage(const char *path, SMB_BIG_UINT *dfree, SMB_BIG_UINT *dsize)
+ 	if (statfs (path, &fsd, sizeof (struct statfs)) != 0)
+ 		return -1;
+ #endif /* STAT_STATFS3_OSF1 */
++
+ 	
+ #ifdef STAT_STATFS2_FS_DATA	/* Ultrix */
+ #define CONVERT_BLOCKS(B) adjust_blocks ((SMB_BIG_UINT)(B), (SMB_BIG_UINT)1024, (SMB_BIG_UINT)512)	
+@@ -173,10 +300,16 @@ int sys_fsusage(const char *path, SMB_BIG_UINT *dfree, SMB_BIG_UINT *dsize)
+ 	if (fsd.f_blocks == 0)
+ 	{
+ 		memset(&fsd, 0, sizeof(fsd));
++
++		init_G();
++
+ 		fsd.f_bsize = 1024;
+-		fsd.f_blocks = cal_size("total=`/bin/mount | grep 'tmpfs on /tmp' | cut -d '=' -f 2 | cut -d ',' -f 1`; let total=$total/1024; echo $total");
+-		fsd.f_bavail = cal_size("/usr/bin/du -shk /tmp/ | cut -d$'\t' -f 1");
++		fsd.f_blocks = G.total_blocks;
++		fsd.f_bavail = du("/tmp");
++		fsd.f_bavail /= 2;   /* *512/1024   */
+ 		fsd.f_bavail = fsd.f_blocks - fsd.f_bavail;
++
++		
+ 	}
+ 	(*dsize) = CONVERT_BLOCKS (fsd.f_blocks);
+ 	(*dfree) = CONVERT_BLOCKS (fsd.f_bavail);

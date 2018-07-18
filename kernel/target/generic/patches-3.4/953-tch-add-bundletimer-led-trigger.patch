@@ -1,0 +1,504 @@
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -60,3 +60,4 @@ obj-$(CONFIG_LEDS_TRIGGER_DEFAULT_ON)	+=
+ obj-$(CONFIG_LEDS_TRIGGER_DEFAULT_ON)	+= ledtrig-default-on.o
+ obj-$(CONFIG_LEDS_TRIGGER_NETDEV)	+= ledtrig-netdev.o
+ obj-$(CONFIG_LEDS_TRIGGER_USBDEV)	+= ledtrig-usbdev.o
++obj-$(CONFIG_LEDS_TRIGGER_BUNDLETIMER)	+= ledtrig-bundletimer.o
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -493,4 +493,13 @@ config LEDS_TRIGGER_USBDEV
+ 	  This allows LEDs to be controlled by the presence/activity of
+ 	  an USB device. If unsure, say N.
+ 
++  config LEDS_TRIGGER_BUNDLETIMER
++	tristate "LED Bundle Timer Trigger"
++	depends on LEDS_TRIGGERS
++	default n
++	help
++	  This allows multiple LEDs to be controlled by the same programmable
++	  timer via sysfs.
++	  If unsure, say N.
++
+ endif # NEW_LEDS
+--- /dev/null
++++ b/drivers/leds/ledtrig-bundletimer.c
+@@ -0,0 +1,478 @@
++/*
++ * Bundle LED trigger driver
++ *
++ * Copyright (C) 2015 Technicolor <linuxgw@technicolor.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ */
++
++#include <linux/spinlock.h>
++#include <linux/delay.h>
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/device.h>
++#include <linux/ctype.h>
++#include <linux/slab.h>
++#include <linux/leds.h>
++#include "leds.h"
++
++#define TIMER_VALID(x) (x != NULL && x != (void *)1)
++
++struct led_list_item {
++	struct list_head list;
++	struct led_classdev *led;
++};
++
++struct timer_list_item {
++	struct list_head list;
++	struct timer_list blink_timer;
++	unsigned long id;
++	unsigned long delay_on;
++	unsigned long delay_off;
++	unsigned long brightness;
++	unsigned long blink_brightness;
++};
++
++static DEFINE_SPINLOCK(mLock);
++static unsigned long flags;
++
++static struct list_head timer_list;
++static struct list_head led_list;
++
++static void delete_bundle_timer(unsigned long id) {
++	int ret, cnt;
++	struct timer_list_item *timer, *match = NULL;
++
++	spin_lock_irqsave(&mLock, flags);
++	list_for_each_entry(timer, &timer_list, list) {
++		if(timer->id == id) {
++			match = timer;
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&mLock, flags);
++
++	if(match) {
++		cnt = 0;
++		do {
++			ret = del_timer_sync(&match->blink_timer);
++			if (ret) {
++				msleep(500);
++				cnt++;
++			}
++		} while(ret && cnt < 3);
++
++		if(cnt < 3) {
++			spin_lock_irqsave(&mLock, flags);
++			list_del(&match->list);
++			spin_unlock_irqrestore(&mLock, flags);
++			kfree(match);
++		} else {
++			printk(KERN_WARNING "Timer %lu is still in use\n", match->id);
++		}
++	}
++}
++
++static void deref_bundle_timer(unsigned long id) {
++	unsigned long nRef = 0;
++	struct led_list_item *led_entry;
++	struct timer_list_item * timer;
++
++	spin_lock_irqsave(&mLock, flags);
++	 list_for_each_entry(led_entry, &led_list, list) {
++		if(TIMER_VALID(led_entry->led->trigger_data)) {
++			timer = (struct timer_list_item *)led_entry->led->trigger_data;
++			if(timer->id == id) {
++				nRef++;
++			}
++		}
++	}
++	spin_unlock_irqrestore(&mLock, flags);
++	if(nRef == 0) {
++		delete_bundle_timer(id);
++	}
++}
++
++static void led_timer_function(unsigned long data)
++{
++	struct timer_list_item *bundleTimer = (void *)data;
++	struct timer_list_item *led_timer;
++	struct led_list_item *led_entry;
++	unsigned long delay;
++
++	spin_lock_irqsave(&mLock, flags);
++	if(!bundleTimer) {
++		spin_unlock_irqrestore(&mLock, flags);
++		return;
++	}
++
++	if (!bundleTimer->delay_on || !bundleTimer->delay_off) {
++		// Turn all the linked leds off
++		list_for_each_entry(led_entry, &led_list, list) {
++			if(TIMER_VALID(led_entry->led->trigger_data)) {
++				led_timer = (struct timer_list_item *)led_entry->led->trigger_data;
++				if(led_timer->id == bundleTimer->id) {
++					led_brightness_set(led_entry->led, LED_OFF);
++				}
++			}
++		}
++		spin_unlock_irqrestore(&mLock, flags);
++		return;
++	}
++
++	if (bundleTimer->blink_brightness == LED_OFF) {
++		bundleTimer->blink_brightness = bundleTimer->brightness;
++		delay = bundleTimer->delay_on;
++	} else {
++		bundleTimer->blink_brightness = LED_OFF;
++		delay = bundleTimer->delay_off;
++	}
++
++	list_for_each_entry(led_entry, &led_list, list) {
++		if(TIMER_VALID(led_entry->led->trigger_data)) {
++			led_timer = (struct timer_list_item *)led_entry->led->trigger_data;
++			if(led_timer->id == bundleTimer->id) {
++				led_brightness_set(led_entry->led, bundleTimer->blink_brightness);
++			}
++		}
++	}
++
++	mod_timer(&bundleTimer->blink_timer, jiffies + msecs_to_jiffies(delay));
++	spin_unlock_irqrestore(&mLock, flags);
++}
++
++static struct led_list_item* led_list_add_entry(struct led_classdev *led_cdev)
++{
++	struct led_list_item *led_entry, *new;
++
++	spin_lock_irqsave(&mLock, flags);
++	list_for_each_entry(led_entry, &led_list, list) {
++		if (led_entry->led == led_cdev) {
++			spin_unlock_irqrestore(&mLock, flags);
++			return led_entry;
++		}
++	}
++	new = kzalloc(sizeof(struct led_list_item), GFP_ATOMIC);
++	if(!new) {
++		spin_unlock_irqrestore(&mLock, flags);
++		printk(KERN_ERR "Failed to allocate memory for led_list_item\n");
++		return NULL;
++	}
++	new->led = led_cdev;
++	list_add_tail(&new->list, &led_list);
++	spin_unlock_irqrestore(&mLock, flags);
++	return new;
++}
++
++static void led_list_del_entry(struct led_classdev *led_cdev)
++{
++	struct led_list_item *led_entry, *led_entry_next;
++
++	spin_lock_irqsave(&mLock, flags);
++	list_for_each_entry_safe(led_entry, led_entry_next, &led_list, list) {
++		if(led_entry->led == led_cdev) {
++			list_del(&led_entry->list);
++			kfree(led_entry);
++			break;
++		}
++	}
++	spin_unlock_irqrestore(&mLock, flags);
++}
++
++static struct timer_list_item* add_led_timer(unsigned long id)
++{
++	struct timer_list_item *timer, *new;
++
++	spin_lock_irqsave(&mLock, flags);
++	list_for_each_entry(timer, &timer_list, list) {
++		if (timer->id == id) {
++			spin_unlock_irqrestore(&mLock, flags);
++			return timer;
++		}
++	}
++	new = kzalloc(sizeof(struct timer_list_item), GFP_ATOMIC);
++	if(!new) {
++		spin_unlock_irqrestore(&mLock, flags);
++		printk(KERN_ERR "Failed to alloc memory for timer_list_item\n");
++		return NULL;
++	}
++	new->id = id;
++	new->blink_brightness = 0;
++	new->brightness = 255;
++	new->delay_on = 250;
++	new->delay_off = 250;
++	setup_timer(&new->blink_timer, led_timer_function, (unsigned long)new);
++	list_add_tail(&new->list, &timer_list);
++	mod_timer(&new->blink_timer, jiffies + 1);
++	spin_unlock_irqrestore(&mLock, flags);
++	return new;
++}
++
++static struct timer_list_item* get_led_timer(unsigned long id)
++{
++	struct timer_list_item *timer;
++
++	spin_lock_irqsave(&mLock, flags);
++	list_for_each_entry(timer, &timer_list, list) {
++		if(timer->id == id) {
++			spin_unlock_irqrestore(&mLock, flags);
++			return timer;
++		}
++	}
++	spin_unlock_irqrestore(&mLock, flags);
++	return NULL;
++}
++
++static ssize_t led_timer_id_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		return sprintf(buf, "%lu\n", timer->id);
++	}
++	return sprintf(buf, "%d\n", 0);
++}
++
++
++static ssize_t led_timer_id_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	unsigned long new_id, id;
++	ssize_t ret = -EINVAL;
++	struct timer_list_item *timer;
++
++	ret = kstrtoul(buf, 10, &new_id);
++	if (ret)
++		return ret;
++
++	// Check if we already have a timer
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		id = timer->id;
++		deref_bundle_timer(id);
++		led_cdev->trigger_data = (void *)1;
++	}
++
++	// Use timer ID 0 to deactivate
++	if(new_id != 0) {
++		timer = get_led_timer(new_id);
++		if(timer) {
++			led_cdev->trigger_data = timer;
++		} else {
++			timer = add_led_timer(new_id);
++			if(timer) {
++				led_cdev->trigger_data = timer;
++			}
++		}
++	}
++
++	return size;
++}
++
++static ssize_t bundle_delay_on_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		return sprintf(buf, "%lu\n", timer->delay_on);
++	}
++	return sprintf(buf, "%d\n", -1);
++}
++
++static ssize_t bundle_delay_on_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	unsigned long state;
++	ssize_t ret = -EINVAL;
++
++	ret = kstrtoul(buf, 10, &state);
++	if (ret)
++		return ret;
++
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		timer->delay_on = state;
++		mod_timer(&timer->blink_timer, jiffies + 1);
++	}
++
++	return size;
++}
++
++static ssize_t bundle_delay_off_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		return sprintf(buf, "%lu\n", timer->delay_off);
++	}
++	return sprintf(buf, "%d\n", -1);
++}
++
++static ssize_t bundle_delay_off_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	unsigned long state;
++	ssize_t ret = -EINVAL;
++
++	ret = kstrtoul(buf, 10, &state);
++	if (ret)
++		return ret;
++
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		timer->delay_off = state;
++		mod_timer(&timer->blink_timer, jiffies + 1);
++	}
++
++	return size;
++}
++
++static ssize_t bundle_brightness_show(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		return sprintf(buf, "%lu\n", timer->brightness);
++	}
++	return sprintf(buf, "%d\n", -1);
++}
++
++static ssize_t bundle_brightness_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t size)
++{
++	struct timer_list_item *timer;
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	unsigned long brightness;
++	ssize_t ret = -EINVAL;
++
++	ret = kstrtoul(buf, 10, &brightness);
++	if (ret)
++		return ret;
++
++	if(TIMER_VALID(led_cdev->trigger_data)) {
++		timer = (struct timer_list_item *)led_cdev->trigger_data;
++		timer->brightness = brightness;
++		mod_timer(&timer->blink_timer, jiffies + 1);
++	}
++
++	return size;
++}
++
++static DEVICE_ATTR(bundle_delay_on, 0644, bundle_delay_on_show, bundle_delay_on_store);
++static DEVICE_ATTR(bundle_delay_off, 0644, bundle_delay_off_show, bundle_delay_off_store);
++static DEVICE_ATTR(bundle_brightness, 0644, bundle_brightness_show, bundle_brightness_store);
++static DEVICE_ATTR(timer_id, 0644, led_timer_id_show, led_timer_id_store);
++
++static void timer_trig_activate(struct led_classdev *led_cdev)
++{
++	int rc;
++
++	led_cdev->trigger_data = NULL;
++
++	rc = device_create_file(led_cdev->dev, &dev_attr_bundle_delay_on);
++	if (rc)
++		return;
++	rc = device_create_file(led_cdev->dev, &dev_attr_bundle_delay_off);
++	if (rc)
++		goto err_out_delayon;
++	rc = device_create_file(led_cdev->dev, &dev_attr_timer_id);
++	if (rc)
++		goto err_out_delayoff;
++	rc = device_create_file(led_cdev->dev, &dev_attr_bundle_brightness);
++	if (rc)
++		goto err_out_timerid;
++
++	led_brightness_set(led_cdev, LED_OFF);
++	if(led_list_add_entry(led_cdev) == NULL)
++		goto err_out_brightness;
++
++	led_cdev->trigger_data = (void *)1;
++
++	return;
++
++err_out_brightness:
++	device_remove_file(led_cdev->dev, &dev_attr_bundle_brightness);
++err_out_timerid:
++	device_remove_file(led_cdev->dev, &dev_attr_timer_id);
++err_out_delayoff:
++	device_remove_file(led_cdev->dev, &dev_attr_bundle_delay_off);
++err_out_delayon:
++	device_remove_file(led_cdev->dev, &dev_attr_bundle_delay_on);
++}
++
++static void timer_trig_deactivate(struct led_classdev *led_cdev)
++{
++	struct timer_list_item *timer;
++	unsigned long id;
++
++	if (led_cdev->trigger_data != NULL) {
++		device_remove_file(led_cdev->dev, &dev_attr_bundle_brightness);
++		device_remove_file(led_cdev->dev, &dev_attr_bundle_delay_on);
++		device_remove_file(led_cdev->dev, &dev_attr_bundle_delay_off);
++		device_remove_file(led_cdev->dev, &dev_attr_timer_id);
++		led_list_del_entry(led_cdev);
++
++		if(led_cdev->trigger_data != (void *)1) {
++			timer = (struct timer_list_item *)led_cdev->trigger_data;
++			id = timer->id;
++			deref_bundle_timer(id);
++		}
++		led_cdev->trigger_data = NULL;
++	}
++	led_brightness_set(led_cdev, LED_OFF);
++}
++
++static struct led_trigger timer_led_trigger = {
++	.name     = "bundletimer",
++	.activate = timer_trig_activate,
++	.deactivate = timer_trig_deactivate,
++};
++
++static int __init timer_trig_init(void)
++{
++	INIT_LIST_HEAD(&led_list);
++	INIT_LIST_HEAD(&timer_list);
++	return led_trigger_register(&timer_led_trigger);
++}
++
++static void __exit timer_trig_exit(void)
++{
++	struct led_list_item *led, *led_next;
++	struct timer_list_item *timer, *timer_next;
++
++	list_for_each_entry_safe(timer, timer_next, &timer_list, list) {
++		list_del(&timer->list);
++		del_timer_sync(&timer->blink_timer);
++		kfree(timer);
++	}
++
++	list_for_each_entry_safe(led, led_next, &led_list, list) {
++		list_del(&led->list);
++		kfree(led);
++	}
++	
++	led_trigger_unregister(&timer_led_trigger);
++}
++
++module_init(timer_trig_init);
++module_exit(timer_trig_exit);
++
++MODULE_DESCRIPTION("Bundle timer LED trigger");
++MODULE_LICENSE("GPL");

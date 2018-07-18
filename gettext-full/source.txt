@@ -1,0 +1,4 @@
+Source: gettext-0.19.6.tar.xz
+Source-Url: @GNU/gettext
+Source-Version: 
+Source-Proto: 

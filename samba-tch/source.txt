@@ -1,0 +1,4 @@
+Source: samba-3.0.37.tar.gz
+Source-Url: ftp://ftp.samba.org/pub/samba/old-versions/
+Source-Version: 
+Source-Proto: 

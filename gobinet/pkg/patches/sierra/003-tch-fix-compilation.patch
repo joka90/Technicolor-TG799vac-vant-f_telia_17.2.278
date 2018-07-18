@@ -1,0 +1,44 @@
+--- a/GobiUSBNet.c
++++ b/GobiUSBNet.c
+@@ -1370,8 +1370,8 @@ static int PrependEthFrame(struct usbnet
+     if (skb_headroom(skb) < ETH_HLEN)
+     {
+         printk(KERN_WARNING "[%s] not enough skb headroom %d, packet dropped\n",
+-                skb_headroom(skb));
+-        printk(KERN_WARNING "[%s] try update skb_reserve at usbnet.c::rx_submit\n");
++                __func__, skb_headroom(skb));
++        printk(KERN_WARNING "[%s] try update skb_reserve at usbnet.c::rx_submit\n", __func__);
+         BUG();
+     }
+ 
+--- a/QMI.c
++++ b/QMI.c
+@@ -421,7 +421,7 @@ u16 GetTLV(
+       }
+    }
+ 
+-   return -ENOMSG;
++   return -ENOMSS;
+ }
+ 
+ /*===========================================================================
+@@ -462,7 +462,7 @@ int ValidQMIMessage(
+    }
+    else
+    {
+-      return -ENOMSG;
++      return -ENOMSS;
+    }
+ }
+ 
+--- a/QMI.h
++++ b/QMI.h
+@@ -154,7 +154,7 @@ extern int qos_debug;
+ #define ENOMEM    12
+ #define EFAULT    14
+ #define EINVAL    22
+-#define ENOMSG    42
++#define ENOMSS    42
+ #define ENODATA   61
+ 
+ #define TLV_TYPE_LINK_PROTO 0x10

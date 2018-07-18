@@ -1,0 +1,4 @@
+Source: libnetfilter_queue-1.0.2.tar.bz2
+Source-Url: http://www.netfilter.org/projects/libnetfilter_queue/files/ ftp://ftp.netfilter.org/pub/libnetfilter_queue/
+Source-Version: 
+Source-Proto: 

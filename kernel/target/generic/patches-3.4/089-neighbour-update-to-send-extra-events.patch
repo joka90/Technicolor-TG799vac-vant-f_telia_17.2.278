@@ -1,0 +1,10 @@
+--- a/net/core/neighbour.c
++++ b/net/core/neighbour.c
+@@ -1168,6 +1168,7 @@ int neigh_update(struct neighbour *neigh
+ 						 neigh->parms->reachable_time :
+ 						 0)));
+ 		neigh->nud_state = new;
++		notify = 1;
+ 	}
+ 
+ 	if (lladdr != neigh->ha) {

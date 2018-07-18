@@ -1,0 +1,15 @@
+--- a/pppd/plugins/rp-pppoe/plugin.c
++++ b/pppd/plugins/rp-pppoe/plugin.c
+@@ -262,6 +262,12 @@ PPPOEConnectDevice(void)
+         }
+         conn->discoverySocket =
+                   openInterface(conn->ifName, Eth_PPPOE_Discovery, conn->myEth);
++        {
++          int ses = conn->session;
++          sendPADT(conn, NULL);
++          sleep(10); /* WORKAROUND : unplug cable first messages could be lost => why ??? */
++          conn->session = ses;
++        }
+         sendPADT(conn, NULL);
+         close(conn->discoverySocket);
+         conn->discoverySocket = -1;

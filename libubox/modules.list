@@ -1,0 +1,6 @@
+[
+    "jshn",
+    "libblobmsg-json",
+    "libjson-script",
+    "libubox"
+]

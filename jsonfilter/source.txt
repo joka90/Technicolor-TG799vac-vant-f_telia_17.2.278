@@ -1,0 +1,4 @@
+Source: jsonfilter-2016-07-02-dea067ad67d977c247c300c06676a06adf21e0c7.tar.gz
+Source-Url: http://git.openwrt.org/project/jsonpath.git
+Source-Version: dea067ad67d977c247c300c06676a06adf21e0c7
+Source-Proto: 

@@ -1,0 +1,59 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+START=19
+
+SERVICE_USE_PID=1
+BMUD_CONF="/var/etc/bmud.conf"
+
+write_config() {
+  local temp
+  config_get temp $1 $2
+  echo "$2=$temp" >>$BMUD_CONF
+}
+
+start() {
+	local batt1_state_file batt2_state_file
+	local enabled
+
+	echo "Starting bmud"
+	config_load "battery_mgmt"
+
+	mkdir -p /var/etc
+	> $BMUD_CONF
+
+	write_config config enable
+	write_config config poll_interval
+	write_config config max_charge
+	write_config config upsconfig_lowbatttime
+	write_config config replacement_threshold
+	write_config config lowcharge_threshold
+	write_config config lifetesting_enabled
+	write_config config lifetest_period
+	write_config config lifetest_tod
+	write_config config packvoltage_smoothingsteps
+	write_config config boardvoltage_smoothingsteps
+	write_config config packtemp_smoothingsteps
+	write_config config boardtemp_smoothingsteps
+	write_config config allowed_faults
+	write_config config nominal_dischargetime
+
+	config_get batt1_state_file battery1 file_location
+	echo "batt1_state_file=$batt1_state_file" >>$BMUD_CONF
+
+	config_get batt2_state_file battery2 file_location
+	echo "batt2_state_file=$batt2_state_file" >>$BMUD_CONF
+
+	config_get_bool enabled config enable 0
+	[ $enabled -eq 0 ] && return 0
+
+	echo "Executing bmud"
+
+	service_start /usr/bin/bmud
+}
+
+stop() {
+	echo "Stopping bmud"
+
+	service_stop /usr/bin/bmud
+}

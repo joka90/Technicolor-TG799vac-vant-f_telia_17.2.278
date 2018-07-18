@@ -1,0 +1,4 @@
+Source: libtommath-1.0-b8527e92f8401a79b86e779caaaf00dca83f73c7.tar.bz2
+Source-Url: https://github.com/libtom/libtommath
+Source-Version: b8527e92f8401a79b86e779caaaf00dca83f73c7
+Source-Proto: 

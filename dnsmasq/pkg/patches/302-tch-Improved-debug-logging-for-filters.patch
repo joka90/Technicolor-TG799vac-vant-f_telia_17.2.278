@@ -1,0 +1,72 @@
+From bece4b631d337d135c05f7eb76fa86d562e811c0 Mon Sep 17 00:00:00 2001
+From: Karl Vogel <karl.vogel@technicolor.com>
+Date: Thu, 6 Nov 2014 10:13:27 +0100
+Subject: [PATCH] Improved debug logging for filters.
+
+---
+ src/cache.c   |  4 ++--
+ src/filter.c  |  2 ++
+ src/network.c | 10 +++++++---
+ 3 files changed, 11 insertions(+), 5 deletions(-)
+
+--- a/src/cache.c
++++ b/src/cache.c
+@@ -1367,7 +1367,7 @@ int cache_make_stat(struct txt_record *t
+ 	    for (serv1 = serv; serv1; serv1 = serv1->next)
+ 	      if (!(serv1->flags & 
+ 		    (SERV_NO_ADDR | SERV_LITERAL_ADDRESS | SERV_COUNTED | SERV_USE_RESOLV | SERV_NO_REBIND)) && 
+-		  sockaddr_isequal(&serv->addr, &serv1->addr))
++		  sockaddr_isequal(&serv->addr, &serv1->addr) && serv->dnsset_id == serv1->dnsset_id)
+ 		{
+ 		  serv1->flags |= SERV_COUNTED;
+ 		  queries += serv1->queries;
+@@ -1452,7 +1452,7 @@ void dump_cache(time_t now)
+ 	for (serv1 = serv; serv1; serv1 = serv1->next)
+ 	  if (!(serv1->flags & 
+ 		(SERV_NO_ADDR | SERV_LITERAL_ADDRESS | SERV_COUNTED | SERV_USE_RESOLV | SERV_NO_REBIND)) && 
+-	      sockaddr_isequal(&serv->addr, &serv1->addr))
++	      sockaddr_isequal(&serv->addr, &serv1->addr) && serv->dnsset_id == serv1->dnsset_id)
+ 	    {
+ 	      serv1->flags |= SERV_COUNTED;
+ 	      queries += serv1->queries;
+--- a/src/filter.c
++++ b/src/filter.c
+@@ -27,6 +27,8 @@ int getdnsset_id(const char *name, struc
+ {
+   struct dns_filter *filter;
+ 
++  if (!daemon->dns_filter)
++    return 0;
+   for(filter = daemon->dns_filter; filter; filter = filter->next)
+     if (strcmp(filter->filtername, name) == 0)
+       {
+--- a/src/network.c
++++ b/src/network.c
+@@ -1574,7 +1574,7 @@ void check_servers(void)
+ 	  else if (serv->interface[0] != 0)
+ 	    my_syslog(LOG_INFO, _("using nameserver %s#%d(via %s)"), daemon->namebuff, port, serv->interface); 
+ 	  else
+-	    my_syslog(LOG_INFO, _("using nameserver %s#%d"), daemon->namebuff, port); 
++	    my_syslog(LOG_INFO, _("using nameserver %s#%d [%d]"), daemon->namebuff, port, serv->dnsset_id);
+ 	}
+     }
+   
+@@ -1678,12 +1678,16 @@ int reload_servers(char *fname)
+ 
+       /* check for comment line that has 'dnsset:' in it, token
+          will point to the set name */
+-      if (daemon->dns_filter &&
+-          (token = strtok(NULL, "\t\n\r")) &&
++      if ((token = strtok(NULL, "\t\n\r")) &&
+           token[0] == '#' &&
+           (token = strstr(token, "dnsset:")) != NULL &&
+           (token = strtok(&token[7], " \t\n\r")) != NULL) {
+               dnsset_id = getdnsset_id(token, NULL);
++              if (!dnsset_id) {
++                  (void)prettyprint_addr(&addr, daemon->namebuff);
++                  my_syslog(LOG_ERR, _("Ignoring nameserver %s for dnsset '%s', no rules for set"), daemon->namebuff, token);
++                  continue;
++              }
+       }
+ 
+       add_update_server(SERV_FROM_RESOLV, &addr, &source_addr, NULL, NULL, dnsset_id);

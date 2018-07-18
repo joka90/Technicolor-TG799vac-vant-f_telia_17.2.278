@@ -1,0 +1,10 @@
+--- openssl-1.0.1e/Makefile	2014-04-08 18:09:34.924567935 -0700
++++ openssl-1.0.1e-orig/Makefile	2014-04-08 18:06:59.448619621 -0700
+@@ -110,7 +110,6 @@
+ ifeq ($(strip $(BUILD_TR69C_SSL)),)
+ CFLAG+= -DOPENSSL_NO_RC4
+ endif
+-CFLAG+= -DOPENSSL_NO_HEARTBEATS
+ endif
+ 
+ 

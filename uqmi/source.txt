@@ -1,0 +1,4 @@
+Source: uqmi-2015-09-17-8a97586e9445a60e355dea13aa87885ab3dcb277.tar.gz
+Source-Url: http://git.openwrt.org/project/uqmi.git
+Source-Version: 8a97586e9445a60e355dea13aa87885ab3dcb277
+Source-Proto: 

@@ -1,0 +1,12 @@
+# !/bin/bash
+
+APP=ebtables-v2.0.10-4
+
+
+p4 edit ${APP}.patch;
+mv ${APP} tmp_${APP};
+tar -xkf ${APP}.tar.bz2;
+mv ${APP} orig_${APP};
+mv tmp_${APP} ${APP};
+diff -ur orig_${APP} ${APP} | grep -v "^Only in ${APP}" | tee ${APP}.patch
+#rm -rf orig_${APP};

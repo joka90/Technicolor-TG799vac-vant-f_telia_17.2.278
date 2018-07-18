@@ -1,0 +1,61 @@
+--- a/include/net/addrconf.h
++++ b/include/net/addrconf.h
+@@ -163,6 +163,9 @@ extern void ipv6_sock_ac_close(struct so
+ 
+ extern int ipv6_dev_ac_inc(struct net_device *dev, const struct in6_addr *addr);
+ extern int __ipv6_dev_ac_dec(struct inet6_dev *idev, const struct in6_addr *addr);
++
++extern void ipv6_ac_destroy_dev(struct inet6_dev *idev);
++
+ extern int ipv6_chk_acast_addr(struct net *net, struct net_device *dev,
+ 			       const struct in6_addr *addr);
+ 
+--- a/net/ipv6/addrconf.c
++++ b/net/ipv6/addrconf.c
+@@ -2929,11 +2929,13 @@ static int addrconf_ifdown(struct net_de
+ 
+ 	write_unlock_bh(&idev->lock);
+ 
+-	/* Step 5: Discard multicast list */
+-	if (how)
++	/* Step 5: Discard anycast and multicast list */
++	if (how) {
++		ipv6_ac_destroy_dev(idev);
+ 		ipv6_mc_destroy_dev(idev);
+-	else
++	} else {
+ 		ipv6_mc_down(idev);
++	}
+ 
+ 	idev->tstamp = jiffies;
+ 
+--- a/net/ipv6/anycast.c
++++ b/net/ipv6/anycast.c
+@@ -338,6 +338,27 @@ static int ipv6_dev_ac_dec(struct net_de
+ 	return __ipv6_dev_ac_dec(idev, addr);
+ }
+ 
++void ipv6_ac_destroy_dev(struct inet6_dev *idev)
++{
++	struct ifacaddr6 *aca;
++
++	write_lock_bh(&idev->lock);
++	while ((aca = idev->ac_list) != NULL) {
++		idev->ac_list = aca->aca_next;
++		write_unlock_bh(&idev->lock);
++
++		addrconf_leave_solict(idev, &aca->aca_addr);
++
++		dst_hold(&aca->aca_rt->dst);
++		ip6_del_rt(aca->aca_rt);
++
++		aca_put(aca);
++
++		write_lock_bh(&idev->lock);
++	}
++	write_unlock_bh(&idev->lock);
++}
++
+ /*
+  *	check if the interface has this anycast address
+  *	called with rcu_read_lock()

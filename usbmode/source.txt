@@ -1,0 +1,4 @@
+Source: usbmode-2014-08-26-993a9a542791953c4804f7ddbb3a07756738e37a.tar.gz
+Source-Url: http://git.openwrt.org/project/usbmode.git
+Source-Version: 993a9a542791953c4804f7ddbb3a07756738e37a
+Source-Proto: 

@@ -1,0 +1,58 @@
+--- a/commands-dms.h
++++ b/commands-dms.h
+@@ -38,9 +38,13 @@
+ 	__uqmi_command(dms_get_imei, get-imei, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_get_msisdn, get-msisdn, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_set_operating_mode, set-device-operating-mode, required, QMI_SERVICE_DMS), \
+-	__uqmi_command(dms_reset, reset-dms, no, QMI_SERVICE_DMS) \
++	__uqmi_command(dms_reset, reset-dms, no, QMI_SERVICE_DMS), \
++	__uqmi_command(dms_get_model, get-model, no, QMI_SERVICE_DMS), \
++	__uqmi_command(dms_get_manufacturer, get-manufacturer, no, QMI_SERVICE_DMS) \
+ 
+ #define dms_helptext \
++		"  --get-model:                      Get device model\n" \
++		"  --get-manufacturer:               Get device manufacturer\n" \
+ 		"  --get-capabilities:               List device capabilities\n" \
+ 		"  --get-pin-status:                 Get PIN verification status\n" \
+ 		"  --verify-pin1 <pin>:              Verify PIN1\n" \
+--- a/commands-dms.c
++++ b/commands-dms.c
+@@ -367,6 +367,38 @@ cmd_dms_get_imei_prepare(struct qmi_dev
+ 	return QMI_CMD_REQUEST;
+ }
+ 
++static void cmd_dms_get_model_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_dms_get_model_response res;
++
++	qmi_parse_dms_get_model_response(msg, &res);
++	if (res.data.model)
++		blobmsg_add_string(&status, NULL, res.data.model);
++}
++
++static enum qmi_cmd_result
++cmd_dms_get_model_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_dms_get_model_request(msg);
++	return QMI_CMD_REQUEST;
++}
++
++static void cmd_dms_get_manufacturer_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_dms_get_manufacturer_response res;
++
++	qmi_parse_dms_get_manufacturer_response(msg, &res);
++	if (res.data.manufacturer)
++		blobmsg_add_string(&status, NULL, res.data.manufacturer);
++}
++
++static enum qmi_cmd_result
++cmd_dms_get_manufacturer_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_dms_get_manufacturer_request(msg);
++	return QMI_CMD_REQUEST;
++}
++
+ #define cmd_dms_reset_cb no_cb
+ static enum qmi_cmd_result
+ cmd_dms_reset_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)

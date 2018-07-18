@@ -1,0 +1,27 @@
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -1610,6 +1610,11 @@ static const struct driver_info wwan_noa
+ };
+ 
+ static const struct usb_device_id cdc_devs[] = {
++	/* Ignore the Huawei E3372 */
++	{ USB_DEVICE(0x12d1, 0x155e),
++	  .driver_info = 0,
++	},
++
+ 	/* Ericsson MBM devices like F5521gw */
+ 	{ .match_flags = USB_DEVICE_ID_MATCH_INT_INFO
+ 		| USB_DEVICE_ID_MATCH_VENDOR,
+--- a/drivers/net/usb/huawei_cdc_ncm.c
++++ b/drivers/net/usb/huawei_cdc_ncm.c
+@@ -200,7 +200,9 @@ static const struct usb_device_id huawei
+ 	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1, 0xff, 0x03, 0x16),
+ 	  .driver_info = (unsigned long)&huawei_cdc_ncm_info,
+ 	},
+-
++	{ USB_DEVICE(0x12d1, 0x155e),
++	  .driver_info = (unsigned long)&huawei_cdc_ncm_info,
++	},
+ 	/* Terminating entry */
+ 	{
+ 	},

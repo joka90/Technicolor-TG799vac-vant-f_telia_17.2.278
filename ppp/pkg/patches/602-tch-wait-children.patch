@@ -1,0 +1,93 @@
+--- a/pppd/lcp.c
++++ b/pppd/lcp.c
+@@ -1935,6 +1935,12 @@ lcp_up(f)
+ 
+     lcp_echo_lowerup(f->unit);  /* Enable echo messages */
+ 
++    /* 
++     * if this is a LCP renegociation, 
++     * wait for ip-down scripts to finish 
++     */
++    wait_children();
++
+     link_established(f->unit);
+ }
+ 
+--- a/pppd/main.c
++++ b/pppd/main.c
+@@ -585,25 +585,11 @@ main(argc, argv)
+ 	    if (!persist)
+ 		break;
+ 	}
++	
++	wait_children();
+     }
+ 
+-    /* Wait for scripts to finish */
+-    reap_kids();
+-    if (n_children > 0) {
+-	if (child_wait > 0)
+-	    TIMEOUT(childwait_end, NULL, child_wait);
+-	if (debug) {
+-	    struct subprocess *chp;
+-	    dbglog("Waiting for %d child processes...", n_children);
+-	    for (chp = children; chp != NULL; chp = chp->next)
+-		dbglog("  script %s, pid %d", chp->prog, chp->pid);
+-	}
+-	while (n_children > 0 && !childwait_done) {
+-	    handle_events();
+-	    if (kill_link && !childwait_done)
+-		childwait_end(NULL);
+-	}
+-    }
++    wait_children();
+ 
+     die(status);
+     return 0;
+@@ -1949,6 +1935,36 @@ record_child(pid, prog, done, arg, killa
+     }
+ }
+ 
++/*
++ * wait_children - wait for scripts to finish.
++ * if child_wait is 0, wait indefinitely.
++ * else, kill'em all at the end of timeout
++ */
++void
++wait_children()
++{
++    /* Wait for scripts to finish */
++    reap_kids();
++    if (n_children > 0) {
++	childwait_done = 0;
++	if (child_wait > 0)
++	    TIMEOUT(childwait_end, NULL, child_wait);
++	if (debug) {
++	    struct subprocess *chp;
++	    dbglog("Waiting for %d child processes...", n_children);
++	    for (chp = children; chp != NULL; chp = chp->next)
++		dbglog("  script %s, pid %d", chp->prog, chp->pid);
++	}
++	while (n_children > 0 && !childwait_done) {
++	    handle_events();
++	    if (kill_link && !childwait_done)
++		childwait_end(NULL);
++	}
++	if (child_wait > 0)
++	    UNTIMEOUT(childwait_end, NULL);
++    }
++}
++
+ /*
+  * childwait_end - we got fed up waiting for the child processes to
+  * exit, send them all a SIGTERM.
+--- a/pppd/pppd.h
++++ b/pppd/pppd.h
+@@ -511,6 +511,7 @@ int  device_script __P((char *cmd, int i
+ pid_t run_program __P((char *prog, char **args, int must_exist,
+ 		       void (*done)(void *), void *arg, int wait));
+ 				/* Run program prog with args in child */
++void wait_children __P((void)); /* Wait for scripts to finish */
+ void reopen_log __P((void));	/* (re)open the connection to syslog */
+ void print_link_stats __P((void)); /* Print stats, if available */
+ void reset_link_stats __P((int)); /* Reset (init) stats when link goes up */

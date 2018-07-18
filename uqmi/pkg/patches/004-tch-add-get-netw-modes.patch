@@ -1,0 +1,29 @@
+--- a/data/qmi-service-nas.json
++++ b/data/qmi-service-nas.json
+@@ -567,6 +567,26 @@
+      "output"  : [  { "common-ref" : "Operation Result" } ] },
+ 
+   // *********************************************************************************
++  {  "name"    : "Get Network Modes",
++     "type"    : "Message",
++     "service" : "NAS",
++     "id"      : "0x0049",
++     "version" : "1.0",
++     "output"  : [  { "common-ref" : "Operation Result" },
++                    { "name"      : "idx0 mode pref",
++                      "id"        : "0x10",
++                      "mandatory" : "no",
++                      "type"      : "TLV",
++                      "format"    : "guint16",
++                      "public-format" : "QmiNasRatModePreference" },
++                    { "name"      : "idx1 mode pref",
++                      "id"        : "0x11",
++                      "mandatory" : "no",
++                      "type"      : "TLV",
++                      "format"    : "guint16",
++                      "public-format" : "QmiNasRatModePreference" } ] },
++
++  // *********************************************************************************
+   {  "name"    : "Get Serving System",
+      "type"    : "Message",
+      "service" : "NAS",

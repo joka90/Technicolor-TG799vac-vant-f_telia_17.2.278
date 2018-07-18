@@ -1,0 +1,87 @@
+From d5b96b5701e4d7caef955b9703a227a76be3f27c Mon Sep 17 00:00:00 2001
+From: Gino Peeters <gino.peeters@technicolor.com>
+Date: Fri, 28 Mar 2014 16:00:11 +0100
+Subject: [PATCH] Avoid concurrent access with iptables
+
+---
+ iptables.c |   41 +++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 41 insertions(+), 0 deletions(-)
+
+--- a/iptables.c
++++ b/iptables.c
+@@ -51,6 +51,8 @@
+ # error "Unsupported xtables version"
+ #endif
+ 
++#include <sys/un.h>
++
+ #include "iptables.h"
+ 
+ 
+@@ -122,6 +124,40 @@ get_kernel_version(void)
+ 	kernel_version = 0x10000 * x + 0x100 * y + z;
+ }
+ 
++/* Unix socket also used by iptables; avoids concurrent xtables access */
++const char xt_socket_name[] = "xtables";
++int  xt_socket = -1;
++
++static void fw3_ipt_lock()
++{
++	int ret;
++	struct sockaddr_un xt_addr;
++
++	memset(&xt_addr, 0, sizeof(xt_addr));
++	xt_addr.sun_family = AF_UNIX;
++	strncpy(xt_addr.sun_path+1, xt_socket_name, sizeof(xt_addr.sun_path) - 2);
++	xt_socket = socket(AF_UNIX, SOCK_STREAM, 0);
++	if (xt_socket < 0)
++		error("Could not open xtables socket\n");
++
++	while (1) {
++		ret = bind(xt_socket, (struct sockaddr*)&xt_addr,
++			   offsetof(struct sockaddr_un, sun_path)+sizeof(xt_socket_name));
++		if (ret == 0)
++			return;
++		usleep(100*1000);
++	}
++
++}
++
++static void fw3_ipt_unlock() {
++
++	if (xt_socket >= 0)
++		close(xt_socket);
++
++	xt_socket = -1;
++}
++
+ static void fw3_init_extensions(void)
+ {
+ 	init_extensions();
+@@ -138,6 +174,8 @@ fw3_ipt_open(enum fw3_family family, enu
+ 	int i;
+ 	struct fw3_ipt_handle *h;
+ 
++	fw3_ipt_lock();
++
+ 	h = fw3_alloc(sizeof(*h));
+ 
+ 	xtables_init();
+@@ -165,6 +203,7 @@ fw3_ipt_open(enum fw3_family family, enu
+ 
+ 	if (!h->handle)
+ 	{
++		fw3_ipt_unlock();
+ 		free(h);
+ 		return NULL;
+ 	}
+@@ -535,6 +574,8 @@ fw3_ipt_commit(struct fw3_ipt_handle *h)
+ void
+ fw3_ipt_close(struct fw3_ipt_handle *h)
+ {
++	fw3_ipt_unlock();
++
+ 	free(h);
+ }
+ 

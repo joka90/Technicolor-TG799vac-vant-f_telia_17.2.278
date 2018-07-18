@@ -1,0 +1,20 @@
+--- a/source/printing/print_cups.c
++++ b/source/printing/print_cups.c
+@@ -650,7 +650,7 @@
+ 
+ 	slprintf(uri, sizeof(uri) - 1, "/printers/%s", PRINTERNAME(snum));
+ 
+-	if ((response = cupsDoFileRequest(http, request, uri, pjob->filename)) != NULL) {
++	if ((response = cups_tch_DoFileRequest(http, request, uri, pjob->filename)) != NULL) {
+ 		if (response->request.status.status_code >= IPP_OK_CONFLICT) {
+ 			DEBUG(0,("Unable to print file to %s - %s\n", PRINTERNAME(snum),
+ 			         ippErrorString(cupsLastError())));
+@@ -662,7 +662,7 @@
+ 			 ippErrorString(cupsLastError())));
+ 	}
+ 
+-	if ( ret == 0 )
++	if ( ret != 0 )
+ 		unlink(pjob->filename);
+ 	/* else print_job_end will do it for us */
+ 

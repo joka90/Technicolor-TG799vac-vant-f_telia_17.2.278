@@ -1,0 +1,7 @@
+#!/bin/sh
+
+shift
+shift
+
+uci set moca.moca0.persistent_parameters="$*"
+uci commit moca.moca0

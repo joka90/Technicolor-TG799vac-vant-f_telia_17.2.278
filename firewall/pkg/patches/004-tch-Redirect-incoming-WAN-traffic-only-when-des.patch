@@ -1,0 +1,55 @@
+From 56820e2e3e09f68e4f9a74e6aff832fbcf2c5729 Mon Sep 17 00:00:00 2001
+From: Alin Nastac <alin.nastac@technicolor.com>
+Date: Fri, 4 Sep 2015 13:54:10 +0200
+Subject: [PATCH] Redirect incoming WAN traffic only when
+ destination IP address matches the IP address configured on the incoming interface
+
+---
+ zones.c | 36 ++++++++++++++++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 4 deletions(-)
+
+--- a/zones.c
++++ b/zones.c
+@@ -383,10 +383,38 @@ print_interface_rule(struct fw3_ipt_hand
+ 	{
+ 		if (has(zone->flags, handle->family, FW3_FLAG_DNAT))
+ 		{
+-			r = fw3_ipt_rule_create(handle, NULL, dev, NULL, sub, NULL);
+-			fw3_ipt_rule_target(r, "zone_%s_prerouting", zone->name);
+-			fw3_ipt_rule_extra(r, zone->extra_src);
+-			fw3_ipt_rule_replace(r, "PREROUTING");
++			struct list_head *addrs;
++			struct fw3_address *addr;
++
++			addrs = zone->masq ? calloc(1, sizeof(*addrs)) : NULL;
++			if (addrs)
++			{
++				/* redirect only the traffic towards a locally configured address */
++				INIT_LIST_HEAD(addrs);
++				fw3_ubus_address(addrs, dev->network);
++
++				list_for_each_entry(addr, addrs, list)
++				{
++					if (!fw3_is_family(addr, handle->family))
++						continue;
++					/* reset mask to its maximum value */
++					memset(&addr->mask.v6, 0xFF, sizeof(addr->mask.v6));
++
++					r = fw3_ipt_rule_create(handle, NULL, dev, NULL, sub, addr);
++					fw3_ipt_rule_target(r, "zone_%s_prerouting", zone->name);
++					fw3_ipt_rule_extra(r, zone->extra_src);
++					fw3_ipt_rule_replace(r, "PREROUTING");
++				}
++
++				fw3_free_list(addrs);
++			}
++			else
++			{
++				r = fw3_ipt_rule_create(handle, NULL, dev, NULL, sub, NULL);
++				fw3_ipt_rule_target(r, "zone_%s_prerouting", zone->name);
++				fw3_ipt_rule_extra(r, zone->extra_src);
++				fw3_ipt_rule_replace(r, "PREROUTING");
++			}
+ 		}
+ 
+ 		if (has(zone->flags, handle->family, FW3_FLAG_SNAT))

@@ -1,0 +1,78 @@
+/*
+7   Copyright (c) 2013 Broadcom Corporation
+   All Rights Reserved
+
+    <:label-BRCM:2013:DUAL/GPL:standard
+
+    Unless you and Broadcom execute a separate written software license
+    agreement governing use of this software, this software is licensed
+    to you under the terms of the GNU General Public License version 2
+    (the "GPL"), available at http://www.broadcom.com/licenses/GPLv2.php,
+    with the following added to such license:
+
+       As a special exception, the copyright holders of this software give
+       you permission to link this software with independent modules, and
+       to copy and distribute the resulting executable under terms of your
+       choice, provided that you also meet, for each linked independent
+       module, the terms and conditions of the license of that module.
+       An independent module is a module which is not derived from this
+       software.  The special exception does not apply to any modifications
+       of the software.
+
+    Not withstanding the above, under no circumstances may you combine
+    this software in any way with any other Broadcom software provided
+    under a license other than the GPL, without Broadcom's express prior
+    written consent.
+
+    :>
+*/
+/******************************************************************************/
+/*                                                                            */
+/* File Description:                                                          */
+/*                                                                            */
+/* This file contains the definitions for Broadcom's 6838 Data path		  	  */
+/* initialization sequence											          */
+/*                                                                            */
+/******************************************************************************/
+
+/*****************************************************************************/
+/*                                                                           */
+/* Include files                                                             */
+/*                                                                           */
+/*****************************************************************************/
+#ifndef __BCM63138_DATA_PATH_INIT_H
+#define __BCM63138_DATA_PATH_INIT_H
+
+typedef enum
+{
+	WAN_TYPE_NONE = 0,
+	WAN_TYPE_RGMII = 1,
+	WAN_TYPE_DSL = 5
+}E_WAN_TYPE;
+
+
+typedef enum
+{
+	DPI_RC_OK,
+	DPI_RC_ERROR
+}E_DPI_RC;
+
+/* TBD. Most/all of these parameters should not be needed. */
+typedef struct
+{
+	E_WAN_TYPE	wanType;
+	uint32_t	mtu_size;
+	uint32_t	headroom_size;
+	uint32_t	car_mode;
+	uint32_t	ip_class_method;
+	uint32_t	bridge_fc_mode;
+}S_DPI_CFG;
+
+uint32_t bcm63138_data_path_init(S_DPI_CFG *pCfg);
+uint32_t bcm63138_data_path_go(void);
+uint32_t bcm63138_data_path_shutdown(void);
+void f_configure_bridge_port_sa_da(void);
+void reset_unreset_rdp_block(void);
+
+
+#endif //#define __BCM63138_DATA_PATH_INIT_H

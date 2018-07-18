@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+
+START=40
+
+start()
+{
+	mknod /dev/detector c 190 0
+	cd /var
+	insmod tdts
+	tdts_rule_agent -r /etc/rule.trf -g 2>/dev/null
+	insmod dpicore
+}
+
+stop()
+{
+	echo "Stopping DPI not implemented yet by Broadcom"
+}

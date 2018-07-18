@@ -1,0 +1,40 @@
+--- a/iptables/iptables.c
++++ b/iptables/iptables.c
+@@ -252,7 +252,7 @@ exit_printhelp(const struct xtables_rule
+ "				network interface name ([+] for wildcard)\n"
+ "  --table	-t table	table to manipulate (default: `filter')\n"
+ "  --verbose	-v		verbose mode\n"
+-"  --wait	-w		wait for the xtables lock\n"
++"  --wait	-w		wait for the xtables lock (default)\n"
+ "  --line-numbers		print line numbers when listing\n"
+ "  --exact	-x		expand numbers (display exact values)\n"
+ "[!] --fragment	-f		match second or further fragments only\n"
+@@ -1318,7 +1318,7 @@ int do_command4(int argc, char *argv[],
+ 	struct in_addr *daddrs = NULL, *dmasks = NULL;
+ 
+ 	int verbose = 0;
+-	bool wait = false;
++	bool wait = !restore;
+ 	const char *chain = NULL;
+ 	const char *shostnetworkmask = NULL, *dhostnetworkmask = NULL;
+ 	const char *policy = NULL, *newname = NULL;
+--- a/iptables/ip6tables.c
++++ b/iptables/ip6tables.c
+@@ -258,7 +258,7 @@ exit_printhelp(const struct xtables_rule
+ "				network interface name ([+] for wildcard)\n"
+ "  --table	-t table	table to manipulate (default: `filter')\n"
+ "  --verbose	-v		verbose mode\n"
+-"  --wait	-w		wait for the xtables lock\n"
++"  --wait	-w		wait for the xtables lock (default)\n"
+ "  --line-numbers		print line numbers when listing\n"
+ "  --exact	-x		expand numbers (display exact values)\n"
+ /*"[!] --fragment	-f		match second or further fragments only\n"*/
+@@ -1322,7 +1322,7 @@ int do_command6(int argc, char *argv[],
+ 	struct in6_addr *smasks = NULL, *dmasks = NULL;
+ 
+ 	int verbose = 0;
+-	bool wait = false;
++	bool wait = !restore;
+ 	const char *chain = NULL;
+ 	const char *shostnetworkmask = NULL, *dhostnetworkmask = NULL;
+ 	const char *policy = NULL, *newname = NULL;

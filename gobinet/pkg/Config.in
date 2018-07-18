@@ -1,0 +1,16 @@
+menu "Gobinet configuration"
+	depends on PACKAGE_kmod-gobinet
+
+	choice
+		prompt "Driver flavor"
+		default GOBINET_SIERRA_WIRELESS
+
+		config GOBINET_SIERRA_WIRELESS
+			bool "Sierra"
+
+		config GOBINET_QUECTEL
+			bool "Quectel"
+
+	endchoice
+
+endmenu

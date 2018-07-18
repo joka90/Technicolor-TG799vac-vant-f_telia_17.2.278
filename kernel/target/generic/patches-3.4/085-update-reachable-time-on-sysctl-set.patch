@@ -1,0 +1,59 @@
+--- a/net/core/neighbour.c
++++ b/net/core/neighbour.c
+@@ -2026,6 +2026,13 @@ static int neightbl_set(struct sk_buff *
+ 				break;
+ 			case NDTPA_BASE_REACHABLE_TIME:
+ 				p->base_reachable_time = nla_get_msecs(tbp[i]);
++				/*
++				 * update reachable_time as well, otherwise, the change will
++				 * only be effective after the next time neigh_periodic_work
++				 * decides to recompute it
++				 */
++				p->reachable_time =
++					neigh_rand_reach_time(p->base_reachable_time);
+ 				break;
+ 			case NDTPA_GC_STALETIME:
+ 				p->gc_staletime = nla_get_msecs(tbp[i]);
+@@ -2770,6 +2777,30 @@ static int proc_unres_qlen(ctl_table *ct
+ 	return ret;
+ }
+ 
++static int proc_base_reachable_time(ctl_table *ctl, int write,
++			   void __user *buffer, size_t *lenp, loff_t *ppos)
++{
++	struct neigh_parms *p = ctl->extra2;
++	int ret;
++
++	if (strcmp(ctl->procname, "base_reachable_time") == 0)
++		ret = proc_dointvec_jiffies(ctl, write, buffer, lenp, ppos);
++	else if (strcmp(ctl->procname, "base_reachable_time_ms") == 0)
++		ret = proc_dointvec_ms_jiffies(ctl, write, buffer, lenp, ppos);
++	else
++		ret = -1;
++
++	if (write && ret == 0 ) {
++		/*
++		 * update reachable_time as well, otherwise, the change will
++		 * only be effective after the next time neigh_periodic_work
++		 * decides to recompute it
++		 */
++		p->reachable_time = neigh_rand_reach_time(p->base_reachable_time);
++	}
++	return ret;
++}
++
+ enum {
+ 	NEIGH_VAR_MCAST_PROBE,
+ 	NEIGH_VAR_UCAST_PROBE,
+@@ -2983,6 +3014,11 @@ int neigh_sysctl_register(struct net_dev
+ 		/* ReachableTime (in milliseconds) */
+ 		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME_MS].proc_handler = handler;
+ 		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME_MS].extra1 = dev;
++	} else {
++		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME].proc_handler = proc_base_reachable_time;
++		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME].extra2 = p;
++		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME_MS].proc_handler = proc_base_reachable_time;
++		t->neigh_vars[NEIGH_VAR_BASE_REACHABLE_TIME_MS].extra2 = p;
+ 	}
+ 
+ 	t->dev_name = kstrdup(dev_name_source, GFP_KERNEL);

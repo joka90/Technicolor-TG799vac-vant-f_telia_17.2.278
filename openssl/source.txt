@@ -1,0 +1,4 @@
+Source: openssl-1.0.2k.tar.gz
+Source-Url: http://ftp.fi.muni.cz/pub/openssl/source/ http://ftp.linux.hr/pub/openssl/source/ http://gd.tuwien.ac.at/infosys/security/openssl/source/ http://www.openssl.org/source/ http://www.openssl.org/source/old/1.0.2/
+Source-Version: 
+Source-Proto: 

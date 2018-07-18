@@ -1,0 +1,21 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -345,6 +345,18 @@ help_out(struct sk_buff *skb, unsigned c
+ 			break;
+ 		}
+ 
++#if defined(CONFIG_BCM_KF_NETFILTER)
++		/* When a stream is paused, GET_PARAMETER is sent on the master connection as a keep-alive.
++		 * In this case, also refresh the child connections */
++		if (strncmp(pdata+cmdoff, "GET_PARAMETER ", 13) == 0) {
++			struct nf_conn *dct;
++			list_for_each_entry(dct, &ct->derived_connections, derived_list) {
++				nf_ct_refresh(dct, skb, setup_timeout*HZ);
++			}
++			break;
++		}
++#endif
++
+ 		if (strncmp(pdata+cmdoff, "SETUP ", 6) != 0)
+ 			continue;   /* not a SETUP message */
+ 

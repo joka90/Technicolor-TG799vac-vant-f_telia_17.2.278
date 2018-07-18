@@ -1,0 +1,4 @@
+config BANKMGR
+	tristate "Bank manager kernel module"
+	help
+        this Kernel module provides access to the banktable through a /proc interface

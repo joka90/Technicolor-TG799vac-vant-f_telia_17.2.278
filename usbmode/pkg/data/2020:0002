@@ -1,0 +1,4 @@
+# Volacomm 303USB
+TargetVendor=0x2020
+TargetProduct=0x4000
+StandardEject=1

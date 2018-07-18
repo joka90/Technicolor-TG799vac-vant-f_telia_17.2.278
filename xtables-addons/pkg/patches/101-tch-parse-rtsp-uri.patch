@@ -1,0 +1,64 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -13,6 +13,8 @@
+  *	- fixed rtcp nat mapping and other port mapping fixes
+  *	- simple TEARDOWN request handling
+  *	- codestyle fixes and other less significant bug fixes 
++ * 2014-02-25: Alin Nastac <alin.nastac at technicolor.com>
++ *      - use IP address read from SETUP URI in expected connections
+  *
+  * based on ip_conntrack_irc.c
+  *
+@@ -305,6 +307,7 @@ help_out(struct sk_buff *skb, unsigned c
+ 		uint transoff = 0;
+ 		uint translen = 0;
+ 		uint off;
++		union nf_inet_addr srvaddr;
+ 		
+ 		if (!rtsp_parse_message(pdata, datalen, &dataoff,
+ 					&hdrsoff, &hdrslen,
+@@ -321,6 +324,26 @@ help_out(struct sk_buff *skb, unsigned c
+ 		if (strncmp(pdata+cmdoff, "SETUP ", 6) != 0)
+ 			continue;   /* not a SETUP message */
+ 
++		srvaddr = ct->tuplehash[!dir].tuple.src.u3;
++
++		/* try to get RTP media source from SETUP URI */
++		off = cmdoff + 6;
++		while (off < datalen) {
++		    if (strncmp(pdata+off, "://", 3) == 0) {
++			off += 3;
++			cmdoff = off;
++			while (off < datalen) {
++			    if (pdata[off] == ':' || pdata[off] == '/' || pdata[off] == ' ') {
++				in4_pton(pdata+cmdoff, off-cmdoff, (u8 *)&srvaddr.in, -1, NULL);
++				break;
++			    }
++			    off++;
++			}
++			break;
++		    }
++		    off++;
++		}
++
+ 		pr_debug("found a setup message\n");
+ 
+ 		off = 0;
+@@ -346,7 +369,7 @@ help_out(struct sk_buff *skb, unsigned c
+ 
+ 		nf_ct_expect_init(rtp_exp, NF_CT_EXPECT_CLASS_DEFAULT,
+ 				  nf_ct_l3num(ct),
+-				  NULL, /* &ct->tuplehash[!dir].tuple.src.u3, */
++				  &srvaddr, /* &ct->tuplehash[!dir].tuple.src.u3, */
+ 				  &ct->tuplehash[!dir].tuple.dst.u3,
+ 				  IPPROTO_UDP, NULL, &be_loport);
+ 
+@@ -364,7 +387,7 @@ help_out(struct sk_buff *skb, unsigned c
+ 
+ 			nf_ct_expect_init(rtcp_exp, NF_CT_EXPECT_CLASS_DEFAULT,
+ 					  nf_ct_l3num(ct),
+-					  NULL, /* &ct->tuplehash[!dir].tuple.src.u3, */
++					  &srvaddr, /* &ct->tuplehash[!dir].tuple.src.u3, */
+ 					  &ct->tuplehash[!dir].tuple.dst.u3,
+ 					  IPPROTO_UDP, NULL, &be_hiport);
+ 

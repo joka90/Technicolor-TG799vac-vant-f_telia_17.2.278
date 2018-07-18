@@ -1,0 +1,4 @@
+Source: odhcpd-2017-05-12.tar.bz2
+Source-Url: git://github.com/dedeckeh/odhcpd.git
+Source-Version: 9428a79c20216a4833f1309d2d924119d32e2c62
+Source-Proto: 

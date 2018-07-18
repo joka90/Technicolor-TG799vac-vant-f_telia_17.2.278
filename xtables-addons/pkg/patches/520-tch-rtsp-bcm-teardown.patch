@@ -1,0 +1,18 @@
+--- a/extensions/rtsp/nf_conntrack_rtsp.c
++++ b/extensions/rtsp/nf_conntrack_rtsp.c
+@@ -341,7 +341,15 @@ help_out(struct sk_buff *skb, unsigned c
+ 
+ 		if (strncmp(pdata+cmdoff, "TEARDOWN ", 9) == 0) {
+ 			pr_debug("teardown handled\n");
++#if defined(CONFIG_BCM_KF_NETFILTER)
++			struct nf_conn *dct;
++			list_for_each_entry(dct, &ct->derived_connections, derived_list) {
++				dct->derived_timeout = 5*HZ;
++				nf_ct_refresh(dct, skb, 5*HZ);
++			}
++#else
+ 			nf_ct_remove_expectations(ct); /* FIXME must be session id aware */
++#endif
+ 			break;
+ 		}
+ 

@@ -1,0 +1,29 @@
+--- a/GobiUSBNet.c	2014-01-16 11:48:34.025925049 +0100
++++ b/GobiUSBNet.c	2014-01-16 12:23:30.636012837 +0100
+@@ -1417,7 +1417,7 @@
+ /*=========================================================================*/
+ static const struct driver_info GobiNetInfo_qmi = {
+    .description   = "QmiNet Ethernet Device",
+-   .flags         = FLAG_ETHER,
++   .flags         = FLAG_WWAN,
+    .bind          = GobiNetDriverBind,
+    .unbind        = GobiNetDriverUnbind,
+ //FIXME refactor below fixup handling at cases below
+@@ -1437,7 +1437,7 @@
+ 
+ static const struct driver_info GobiNetInfo_gobi = {
+    .description   = "GobiNet Ethernet Device",
+-   .flags         = FLAG_ETHER,
++   .flags         = FLAG_WWAN,
+    .bind          = GobiNetDriverBind,
+    .unbind        = GobiNetDriverUnbind,
+ #ifdef DATA_MODE_RP
+@@ -1455,7 +1455,7 @@
+ 
+ static const struct driver_info GobiNetInfo_9x15 = {
+    .description   = "GobiNet Ethernet Device",
+-   .flags         = FLAG_ETHER,
++   .flags         = FLAG_WWAN,
+    .bind          = GobiNetDriverBind,
+    .unbind        = GobiNetDriverUnbind,
+ #ifdef DATA_MODE_RP

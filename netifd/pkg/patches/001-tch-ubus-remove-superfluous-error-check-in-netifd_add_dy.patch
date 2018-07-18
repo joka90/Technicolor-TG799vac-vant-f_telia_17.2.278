@@ -1,0 +1,42 @@
+From: Hans Dedecker <dedeckeh@gmail.com>
+Date: Mon, 12 Jun 2017 20:07:18 +0200
+Subject: [PATCH netifd] ubus: remove superfluous error check in netifd_add_dynamic
+
+Check for main device and main device having default config for a dynamic
+interface was orginally added in commit 266d92dd83bd5bfe520f3e2838794bf9bb827c07
+with as purpose to set the device config. The latter was later removed in
+commit 4bf89afc22b43d5bd155d32d3998348a77179c1a which makes the device checks
+superfluous.
+
+Also not all interfaces have a main device (eg tunnel interfaces) resulting
+into netifd_add_dynamic returning an error code when such interfaces are added.
+As an example 6rd interfaces dynamically added by the DHCP script the log
+messages are cluttered with the trace 'wan (7803): Command failed: Unknown error'
+after each DHCP renew.
+
+Signed-off-by: Hans Dedecker <dedeckeh@gmail.com>
+---
+ ubus.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+--- a/ubus.c
++++ b/ubus.c
+@@ -127,7 +127,6 @@ netifd_add_dynamic(struct ubus_context *
+ 	struct blob_attr *tb[__DI_MAX];
+ 	struct interface *iface;
+ 	struct blob_attr *config;
+-	struct device *dev;
+ 
+ 	blobmsg_parse(dynamic_policy, __DI_MAX, tb, blob_data(msg), blob_len(msg));
+ 
+@@ -155,10 +154,6 @@ netifd_add_dynamic(struct ubus_context *
+ 	// Set interface as dynamic
+ 	interface_set_dynamic(iface);
+ 
+-	dev = iface->main_dev.dev;
+-	if (!dev || !dev->default_config)
+-		return UBUS_STATUS_UNKNOWN_ERROR;
+-
+ 	return UBUS_STATUS_OK;
+ 
+ error:

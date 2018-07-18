@@ -1,0 +1,8 @@
+#! /usr/bin/env stap
+
+probe module("ncrmod").function("_ncr_session_final").return
+{
+	printf ("exit %s <- %s\n", thread_indent(-1), probefunc())
+	printf ("%s args [%s]\n", probefunc(), $$return)
+}
+

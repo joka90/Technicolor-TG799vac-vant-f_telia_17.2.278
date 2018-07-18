@@ -1,0 +1,4 @@
+Source: ifstat-1.1.tar.gz
+Source-Url: http://gael.roualland.free.fr/ifstat
+Source-Version: 
+Source-Proto: 

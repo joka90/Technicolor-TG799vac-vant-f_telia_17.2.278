@@ -1,0 +1,57 @@
+--- a/commands-dms.c
++++ b/commands-dms.c
+@@ -456,3 +456,36 @@ cmd_dms_set_operating_mode_prepare(struc
+ 
+ 	return uqmi_add_error("Invalid argument");
+ }
++
++static void cmd_dms_get_operating_mode_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_dms_get_operating_mode_response res;
++
++	qmi_parse_dms_get_operating_mode_response(msg, &res);
++	if (res.set.mode) {
++		static const char *modes[] = {
++			[QMI_DMS_OPERATING_MODE_ONLINE] = "online",
++			[QMI_DMS_OPERATING_MODE_LOW_POWER] = "low_power",
++			[QMI_DMS_OPERATING_MODE_FACTORY_TEST] = "factory_test",
++			[QMI_DMS_OPERATING_MODE_OFFLINE] = "offline",
++			[QMI_DMS_OPERATING_MODE_RESET] = "reset",
++			[QMI_DMS_OPERATING_MODE_SHUTTING_DOWN] = "shutting_down",
++			[QMI_DMS_OPERATING_MODE_PERSISTENT_LOW_POWER] = "persistent_low_power",
++			[QMI_DMS_OPERATING_MODE_MODE_ONLY_LOW_POWER] = "mode_only_low_power",
++		};
++		blobmsg_add_string(&status, "mode", modes[res.data.mode]);
++	}
++	if(res.set.offline_reason) {
++		blobmsg_add_u32(&status, "offline_reason", res.data.offline_reason);
++	}
++	if(res.set.hardware_restricted_mode) {
++		blobmsg_add_u32(&status, "hardware_restricted_mode", res.data.hardware_restricted_mode);
++	}
++}
++
++static enum qmi_cmd_result
++cmd_dms_get_operating_mode_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_dms_get_operating_mode_request(msg);
++	return QMI_CMD_REQUEST;
++}
+--- a/commands-dms.h
++++ b/commands-dms.h
+@@ -37,6 +37,7 @@
+ 	__uqmi_command(dms_get_imsi, get-imsi, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_get_imei, get-imei, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_get_msisdn, get-msisdn, no, QMI_SERVICE_DMS), \
++	__uqmi_command(dms_get_operating_mode, get-device-operating-mode, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_set_operating_mode, set-device-operating-mode, required, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_reset, reset-dms, no, QMI_SERVICE_DMS), \
+ 	__uqmi_command(dms_get_model, get-model, no, QMI_SERVICE_DMS), \
+@@ -72,6 +73,7 @@
+ 		"  --get-imei:                       Get International Mobile Equipment ID\n" \
+ 		"  --get-msisdn:                     Get the MSISDN (telephone number)\n" \
+ 		"  --reset-dms:                      Reset the DMS service\n" \
++		"  --get-device-operating-mode       Gets the current device operating mode\n" \
+ 		"  --set-device-operating-mode <m>   Set the device operating mode\n" \
+ 		"                                    (modes: online, low_power, factory_test, offline\n" \
+ 		"                                     reset, shutting_down, persistent_low_power,\n" \

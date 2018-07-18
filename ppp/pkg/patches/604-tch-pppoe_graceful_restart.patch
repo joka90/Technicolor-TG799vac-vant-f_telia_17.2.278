@@ -1,0 +1,91 @@
+--- a/pppd/plugins/rp-pppoe/plugin.c
++++ b/pppd/plugins/rp-pppoe/plugin.c
+@@ -65,6 +65,7 @@ char pppd_version[] = VERSION;
+ char *pppd_pppoe_service = NULL;
+ static char *acName = NULL;
+ static char *existingSession = NULL;
++static char *gracefulRestartPath = NULL;
+ static int printACNames = 0;
+ static char *pppoe_reqd_mac = NULL;
+ unsigned char pppoe_reqd_mac_addr[6];
+@@ -95,6 +96,8 @@ static option_t Options[] = {
+     { "pppoe_backoff", o_special, (void *)&PPPoEBackOffHook,
+       "Set the minimum and maximum retransmission interval",
+       OPT_PRIO | OPT_A2STRVAL, &pppoe_backoff_string },
++    { "graceful_restart",    o_string, &gracefulRestartPath,
++      "graceful restart of session (path)" },
+     { NULL }
+ };
+ int (*OldDevnameHook)(char *cmd, char **argv, int doit) = NULL;
+@@ -235,6 +238,37 @@ PPPOEConnectDevice(void)
+     conn->acName = acName;
+     conn->serviceName = pppd_pppoe_service;
+     strlcpy(ppp_devnam, devnam, sizeof(ppp_devnam));
++    if (gracefulRestartPath) {
++      FILE *fp;
++      fp=fopen(gracefulRestartPath, "r");
++      if (fp) {
++        unsigned int mac[ETH_ALEN];
++        int i, ses;
++        int ret;
++        ret = fscanf(fp, "%d %x:%x:%x:%x:%x:%x",
++             &ses, &mac[0], &mac[1], &mac[2],
++             &mac[3], &mac[4], &mac[5]);
++        fclose(fp);
++        if (ret != 7) {
++            fatal("Illegal value for graceful_restart option");
++        }
++        warn("Read gracefulRestartPath = %s, session=%d peerEth=%x:%x:%x:%x:%x:%x",
++           gracefulRestartPath,
++           ses, mac[0], mac[1], mac[2],
++           mac[3], mac[4], mac[5]);
++        conn->session = htons(ses);
++        for (i=0; i<ETH_ALEN; i++) {
++            conn->peerEth[i] = (unsigned char) mac[i];
++        }
++        conn->discoverySocket =
++                  openInterface(conn->ifName, Eth_PPPOE_Discovery, conn->myEth);
++        sendPADT(conn, NULL);
++        close(conn->discoverySocket);
++        conn->discoverySocket = -1;
++      }
++
++    }
++
+     if (existingSession) {
+ 	unsigned int mac[ETH_ALEN];
+ 	int i, ses;
+@@ -286,6 +320,33 @@ PPPOEConnectDevice(void)
+ 
+     script_setenv("MACREMOTE", remote_number, 0);
+ 
++    if (gracefulRestartPath) {
++      FILE *fp;
++      fp=fopen(gracefulRestartPath, "w");
++      if (fp) {
++        fprintf(fp, "%d %02X:%02X:%02X:%02X:%02X:%02X\n",
++              ppp_session_number, 
++              (unsigned) conn->peerEth[0],
++              (unsigned) conn->peerEth[1],
++              (unsigned) conn->peerEth[2],
++              (unsigned) conn->peerEth[3],
++              (unsigned) conn->peerEth[4],
++              (unsigned) conn->peerEth[5]);
++        fclose(fp);
++        warn("Write gracefulRestartPath = %s, session=%d peerEth=%x:%x:%x:%x:%x:%x", 
++            gracefulRestartPath, ppp_session_number,
++            (unsigned) conn->peerEth[0],
++            (unsigned) conn->peerEth[1],
++            (unsigned) conn->peerEth[2],
++            (unsigned) conn->peerEth[3],
++            (unsigned) conn->peerEth[4],
++            (unsigned) conn->peerEth[5]);
++
++      } else {
++          fatal("Write failed graceful_restart : %s %d", gracefulRestartPath, errno);
++      }
++    }
++
+     if (connect(conn->sessionSocket, (struct sockaddr *) &sp,
+ 		sizeof(struct sockaddr_pppox)) < 0) {
+ 	error("Failed to connect PPPoE socket: %d %m", errno);

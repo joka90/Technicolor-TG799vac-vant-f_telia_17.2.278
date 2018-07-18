@@ -1,0 +1,352 @@
+Only in openssl-1.0.1e/crypto: lib_config.patch
+diff -u -r openssl-1.0.1e/crypto/opensslconf.h openssl-1.0.1e-orig/crypto/opensslconf.h
+--- openssl-1.0.1e/crypto/opensslconf.h	2014-02-05 16:39:18.799795953 -0800
++++ openssl-1.0.1e-orig/crypto/opensslconf.h	2014-02-05 16:38:32.834793928 -0800
+@@ -20,6 +20,9 @@
+ #ifndef OPENSSL_NO_MD2
+ # define OPENSSL_NO_MD2
+ #endif
++#ifndef OPENSSL_NO_RC5
++# define OPENSSL_NO_RC5
++#endif
+ #ifndef OPENSSL_NO_RFC3779
+ # define OPENSSL_NO_RFC3779
+ #endif
+diff -u -r openssl-1.0.1e/Makefile openssl-1.0.1e-orig/Makefile
+--- openssl-1.0.1e/Makefile	2014-02-05 16:41:22.604863822 -0800
++++ openssl-1.0.1e-orig/Makefile	2014-02-05 16:38:32.791796471 -0800
+@@ -4,19 +4,6 @@
+ ## Makefile for OpenSSL
+ ##
+ 
+-#
+-# Set our CommEngine directory (by splitting the pwd into two words
+-# at /userspace and taking the first word only).
+-# Then include the common defines under CommEngine.
+-#
+-CURR_DIR := $(shell pwd)
+-BUILD_DIR:=$(subst /userspace, /userspace,$(CURR_DIR))
+-BUILD_DIR:=$(word 1, $(BUILD_DIR))
+-TARGETS_DIR = $(BUILD_DIR)/targets
+-
+-include $(BUILD_DIR)/make.common
+-
+-
+ VERSION=1.0.1e
+ MAJOR=1
+ MINOR=0.1
+@@ -24,31 +11,11 @@
+ SHLIB_VERSION_HISTORY=
+ SHLIB_MAJOR=1
+ SHLIB_MINOR=0.0
+-SHLIB_EXT=.so.$(SHLIB_MAJOR).$(SHLIB_MINOR)
+-ifeq ($(strip $(PROFILE_ARCH)),arm)
+-PLATFORM=linux-armv4
+-else
+-PLATFORM=mips
+-endif
+-OPTIONS=--prefix=$(BCM_FSBUILD_DIR)/public no-krb5 no-hw shared no-bf no-cast no_md2 no-md4 no-mdc2 no-ripemd no-rc2 no-krb5
+-#Sarah: todo: now no-engine for httpd ssl
+-OPTIONS += no-engine no-static-engine
+-ifeq ($(strip $(BUILD_HTTPD_SSL)),)
+-OPTIONS += no-engine no-static-engine
+-#OPTIONS += no_ocsp
+-endif
+-ifneq ($(strip $(BENCHMARKS_SMP)),y)
+-OPTIONS += no-threads no-zlib no_speed
+-endif
+-
+-CONFIGURE_ARGS=--prefix=$(BCM_FSBUILD_DIR)/public no-krb5 no-hw shared mips
+-SHLIB_TARGET=linux-shared
+-
+-#Sarah: todo: now no-engine for httpd ssl
+-CONFIGURE_ARGS += no-engine
+-ifeq ($(strip $(BUILD_HTTPD_SSL)),)
+-CONFIGURE_ARGS += no-engine
+-endif
++SHLIB_EXT=
++PLATFORM=dist
++OPTIONS= no-ec_nistp_64_gcc_128 no-gmp no-jpake no-krb5 no-md2 no-rc5 no-rfc3779 no-sctp no-shared no-store no-zlib no-zlib-dynamic static-engine
++CONFIGURE_ARGS=dist
++SHLIB_TARGET=
+ 
+ # HERE indicates where this Makefile lives.  This can be used to indicate
+ # where sub-Makefiles are expected to be.  Currently has very limited usage,
+@@ -59,10 +26,10 @@
+ # for, say, /usr/ and yet have everything installed to /tmp/somedir/usr/.
+ # Normally it is left empty.
+ INSTALL_PREFIX=
+-INSTALLTOP=$(BCM_FSBUILD_DIR)/public/
++INSTALLTOP=/usr/local/ssl
+ 
+ # Do not edit this manually. Use Configure --openssldir=DIR do change this!
+-OPENSSLDIR=$(BCM_FSBUILD_DIR)/public/
++OPENSSLDIR=/usr/local/ssl
+ 
+ # NO_IDEA - Define to build without the IDEA algorithm
+ # NO_RC4  - Define to build without the RC4 algorithm
+@@ -92,68 +59,20 @@
+ # equal 4.
+ # PKCS1_CHECK - pkcs1 tests.
+ 
+-#CC= cc
+-CFLAG= -fPIC -DOPENSSL_THREADS -D_REENTRANT -DDSO_DLFCN -DHAVE_DLFCN_H -DOPENSSL_NO_KRB5 -DOPENSSL_NO_HW -Os -fomit-frame-pointer -Wall
+-# ARCH_ENDIAN is defined in make.comon.  Assign Endianess according to the ARCH_ENDIAN (little or big).
+-ifeq ($(strip $(ARCH_ENDIAN)),little)
+-CFLAG += -DL_ENDIAN
+-else
+-CFLAG += -DB_ENDIAN
+-endif
+-CFLAG+= -DOPENSSL_NO_IDEA  -DOPENSSL_NO_BF -DOPENSSL_NO_CAST -DOPENSSL_NO_MD2 -DOPENSSL_NO_MD4 -DOPENSSL_NO_RIPEMD -DOPENSSL_NO_MDC2 -DOPENSSL_NO_RC2
+-CFLAG += $(BRCM_WERROR_CFLAGS)
+-#Sarah: todo: now no-engine for httpd ssl
+-CFLAG+= -DOPENSSL_NO_ENGINE 
+-ifeq ($(strip $(BUILD_HTTPD_SSL)),)
+-#CFLAG+= -DOPENSSL_NO_OCSP
+-CFLAG+= -DOPENSSL_NO_ENGINE -DOPENSSL_NO_RC5 -DOPENSSL_NO_ERR -DOPENSSL_NO_SSL2 
+-ifeq ($(strip $(BUILD_TR69C_SSL)),)
+-CFLAG+= -DOPENSSL_NO_RC4
+-endif
+-endif
+-
+-
+-ifneq ($(strip $(BENCHMARKS_SMP)),y)
+-CFLAG+= -DOPENSSL_NO_SPEED
+-endif
+-
+-
+-#CONFIG_MIPS_BRCM: mwang: really should put this in LDFLAGS, but the app/Makefile does not have LDFLAG
+-CFLAG += -Wl,-rpath, -L$(INSTALL_DIR)/lib -L$(INSTALL_DIR)/lib/public
+-#CFLAG += -Werror -Wfatal-errors
+-CFLAG += -Wno-error=uninitialized
+-CFLAG += -I$(TOOLCHAIN)/include -Wl,-L$(TOOLCHAIN)/lib -Wl,-L$(TOOLCHAIN_TOP)/lib
+-
+-DEPFLAG= -DOPENSSL_NO_EC_NISTP_64_GCC_128 -DOPENSSL_NO_GMP -DOPENSSL_NO_JPAKE -DOPENSSL_NO_MD2  -DOPENSSL_NO_RFC3779 -DOPENSSL_NO_SCTP -DOPENSSL_NO_STORE
++CC= cc
++CFLAG= -O
++DEPFLAG= -DOPENSSL_NO_EC_NISTP_64_GCC_128 -DOPENSSL_NO_GMP -DOPENSSL_NO_JPAKE -DOPENSSL_NO_MD2 -DOPENSSL_NO_RC5 -DOPENSSL_NO_RFC3779 -DOPENSSL_NO_SCTP -DOPENSSL_NO_STORE
+ PEX_LIBS= 
+-
+-#Sarah: todo: now no-engine for httpd ssl
+-DEPFLAG += -DOPENSSL_NO_ENGINE
+-ifeq ($(strip $(BUILD_HTTPD_SSL)),)
+-DEPFLAG += -DOPENSSL_NO_ENGINE -DOPENSSL_NO_RC5
+-endif
+-
+-ifeq ($(strip $(DESKTOP_LINUX)),y)
+-EX_LIBS= -ldl
+-else
+-ifneq ($(strip $(LEGACY_TOOLCHAIN)),y)
+-EX_LIBS= -ldl -L$(USRLIBDIR) -L$(USRGCCLIBDIR) -lgcc_s
+-else
+-EX_LIBS= -ldl
+-endif
+-endif
+-
+-
++EX_LIBS= 
+ EXE_EXT= 
+ ARFLAGS= 
+ AR= ar $(ARFLAGS) r
+-#RANLIB= /usr/bin/ranlib
+-#NM= nm
++RANLIB= /usr/bin/ranlib
++NM= nm
+ PERL= /usr/bin/perl
+ TAR= tar
+ TARFLAGS= --no-recursion --record-size=10240
+-#MAKEDEPPROG=makedepend
+-MAKEDEPPROG=gcc
++MAKEDEPPROG=makedepend
+ LIBDIR=lib
+ 
+ # We let the C compiler driver to take care of .s files. This is done in
+@@ -218,44 +137,22 @@
+ 
+ BASEADDR=0xFB00000
+ 
+-DIRS=   crypto ssl apps tools
++DIRS=   crypto ssl engines apps test tools
+ ENGDIRS= ccgost
+ SHLIBDIRS= crypto ssl
+ 
+ # dirs in crypto to build
+ SDIRS=  \
+ 	objects \
+-	md5 sha hmac whrlpool \
+-	des aes camellia seed modes \
+-	bn ec rsa dsa ecdsa dh ecdh dso \
++	md4 md5 sha mdc2 hmac ripemd whrlpool \
++	des aes rc2 rc4 idea bf cast camellia seed modes \
++	bn ec rsa dsa ecdsa dh ecdh dso engine \
+ 	buffer bio stack lhash rand err \
+ 	evp asn1 pem x509 x509v3 conf txt_db pkcs7 pkcs12 comp ocsp ui krb5 \
+ 	cms pqueue ts srp cmac
+ # keep in mind that the above list is adjusted by ./Configure
+ # according to no-xxx arguments...
+ 
+-# if BUILD_TR69C_SSL is enabled then add rc4
+-ifneq ($(strip $(BUILD_TR69C_SSL)),)
+-SDIRS+= rc4
+-endif
+-
+-ifneq ($(strip $(BUILD_HTTPD_SSL)),)
+-# if BUILD_TR69C_SSL is disabled then add rc4 when BUILD_HTTPD_SSL is enabled
+-ifeq ($(strip $(BUILD_TR69C_SSL)),)
+-SDIRS+= rc4
+-endif
+-SDIRS+= rc5 aes ocsp
+-#Sarah: todo: now no-engine for httpd ssl
+-#SDIRS+= engine
+-#DIRS += engines
+-endif
+-
+-
+-/* brcm: aes used by other modules */
+-#ifneq ($(strip $(BUILD_IPSEC_TOOLS)),)
+-SDIRS+= aes
+-#endif
+-
+ # tests to perform.  "alltests" is a special word indicating that all tests
+ # should be performed.
+ TESTS = alltests
+@@ -277,8 +174,8 @@
+ LIBS=   libcrypto.a libssl.a
+ SHARED_CRYPTO=libcrypto$(SHLIB_EXT)
+ SHARED_SSL=libssl$(SHLIB_EXT)
+-SHARED_LIBS= $(SHARED_CRYPTO) $(SHARED_SSL)
+-SHARED_LIBS_LINK_EXTS=.so.$(SHLIB_MAJOR) .so
++SHARED_LIBS=
++SHARED_LIBS_LINK_EXTS=
+ SHARED_LDFLAGS=
+ 
+ GENERAL=        Makefile
+@@ -291,8 +188,6 @@
+ 
+ all: Makefile build_all openssl.pc libssl.pc libcrypto.pc
+ 
+-dynamic: all install
+-
+ # as we stick to -e, CLEARENV ensures that local variables in lower
+ # Makefiles remain local and variable. $${VAR+VAR} is tribute to Korn
+ # shell, which [annoyingly enough] terminates unset with error if VAR
+@@ -382,13 +277,10 @@
+ build_crypto:
+ 	@dir=crypto; target=all; $(BUILD_ONE_CMD)
+ build_ssl:
+-	echo ssssssssssssssssssssssssssssssssssssssss
+ 	@dir=ssl; target=all; $(BUILD_ONE_CMD)
+ build_engines:
+-	echo eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+ 	@dir=engines; target=all; $(BUILD_ONE_CMD)
+ build_apps:
+-	echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ 	@dir=apps; target=all; $(BUILD_ONE_CMD)
+ build_tests:
+ 	@dir=test; target=all; $(BUILD_ONE_CMD)
+@@ -440,7 +332,7 @@
+ 		fi; \
+ 	done
+ 
+-link-shared: do_$(SHLIB_TARGET)
++link-shared:
+ 	@ set -e; for i in $(SHLIBDIRS); do \
+ 		$(MAKE) -f $(HERE)/Makefile.shared -e $(BUILDENV) \
+ 			LIBNAME=$$i LIBVERSION=$(SHLIB_MAJOR).$(SHLIB_MINOR) \
+@@ -506,23 +398,15 @@
+ 	    echo 'Libs.private: $(EX_LIBS)'; \
+ 	    echo 'Cflags: -I$${includedir} $(KRB5_INCLUDES)' ) > openssl.pc
+ 
+-#Makefile: Makefile.org Configure config
+-#	@echo "Makefile is older than Makefile.org, Configure or config."
+-#	@echo "Reconfigure the source tree (via './config' or 'perl Configure'), please."
+-#	@false
+-Makefile: 
++Makefile: Makefile.org Configure config
++	@echo "Makefile is older than Makefile.org, Configure or config."
++	@echo "Reconfigure the source tree (via './config' or 'perl Configure'), please."
++	@false
+ 
+ libclean:
+ 	rm -f *.map *.so *.so.* *.dylib *.dll engines/*.so engines/*.dll engines/*.dylib *.a engines/*.a */lib */*/lib
+-	rm -f $(INSTALL_DIR)/lib/libssl.so*
+-	rm -f $(INSTALL_DIR)/lib/libcrypto.so*
+-	rm -f $(INSTALL_DIR)/bin/openssl
+ 
+ clean:	libclean
+-	if [ ! -f Makefile.org ]; then \
+-		echo Untarring original source...; \
+-		(tar xkfj $(LIB_DIRS)/openssl.tar.bz2 -C $(LIB_DIRS) 2> /dev/null || true); \
+-	fi
+ 	rm -f shlib/*.o *.o core a.out fluff rehash.time testlog make.log cctest cctest.c
+ 	@set -e; target=clean; $(RECURSIVE_BUILD_CMD)
+ 	rm -f $(LIBS)
+@@ -533,12 +417,6 @@
+ 	do \
+ 	rm -fr $$i/*; \
+ 	done
+-	
+-#
+-# distclean shall be called at upper level
+-#
+-distclean:clean
+-
+ 
+ makefile.one: files
+ 	$(PERL) util/mk1mf.pl >makefile.one; \
+@@ -661,40 +539,7 @@
+ dist_pem_h:
+ 	(cd crypto/pem; $(MAKE) -e $(BUILDENV) pem.h; $(MAKE) clean)
+ 
+-#install: all install_docs install_sw
+-
+-### if ipsec is enabled, include openssl application
+-ifeq ($(strip $(BUILD_IPSEC_TOOLS)),)
+-ifeq ($(strip $(BUILD_CERT)),)
+-# if ipsec and cert are both disabled then install libs only
+-install: install_libs
+-else
+-# if cert is enabled then install app and libs
+-install: install_app install_libs
+-endif
+-else
+-# if ipsec is enabled then install app and libs
+-install: install_app install_libs
+-endif
+-
+-install_app:
+-	mkdir -p $(INSTALL_DIR)/bin
+-	install -m 755 apps/openssl $(INSTALL_DIR)/bin
+-
+-install_libs:
+-	mkdir -p $(INSTALL_DIR)/lib
+-	install -m 755 libssl.so.$(SHLIB_VERSION_NUMBER) $(INSTALL_DIR)/lib
+-	(cd $(INSTALL_DIR)/lib; rm -f libssl.so; ln -s libssl.so.$(SHLIB_VERSION_NUMBER) libssl.so)
+-	install -m 755 libcrypto.so.$(SHLIB_VERSION_NUMBER) $(INSTALL_DIR)/lib
+-	(cd $(INSTALL_DIR)/lib; rm -f libcrypto.so; ln -s libcrypto.so.$(SHLIB_VERSION_NUMBER) libcrypto.so)
+-	mkdir -p $(BCM_FSBUILD_DIR)/lib
+-	install -m 755 libssl.so.$(SHLIB_VERSION_NUMBER) $(BCM_FSBUILD_DIR)/lib
+-	(cd $(BCM_FSBUILD_DIR)/lib; rm -f libssl.so; ln -s libssl.so.$(SHLIB_VERSION_NUMBER) libssl.so)
+-	install -m 755 libcrypto.so.$(SHLIB_VERSION_NUMBER) $(BCM_FSBUILD_DIR)/lib
+-	(cd $(BCM_FSBUILD_DIR)/lib; rm -f libcrypto.so; ln -s libcrypto.so.$(SHLIB_VERSION_NUMBER) libcrypto.so)
+-	mkdir -p $(BCM_FSBUILD_DIR)/public/include/openssl
+-	install -m 755 include/openssl/* $(BCM_FSBUILD_DIR)/public/include/openssl
+-
++install: all install_docs install_sw
+ 
+ install_sw:
+ 	@$(PERL) $(TOP)/util/mkdir-p.pl $(INSTALL_PREFIX)$(INSTALLTOP)/bin \
+@@ -752,9 +597,9 @@
+ 				fi; \
+ 			fi; \
+ 		done; \
+-#		(	here="`pwd`"; \
+-#			cd $(INSTALL_PREFIX)$(INSTALLTOP)/$(LIBDIR); \
+-#			$(MAKE) -f $$here/Makefile HERE="$$here" link-shared ); \
++		(	here="`pwd`"; \
++			cd $(INSTALL_PREFIX)$(INSTALLTOP)/$(LIBDIR); \
++			$(MAKE) -f $$here/Makefile HERE="$$here" link-shared ); \
+ 		if [ "$(INSTALLTOP)" != "/usr" ]; then \
+ 			echo 'OpenSSL shared libraries have been installed in:'; \
+ 			echo '  $(INSTALLTOP)'; \
+Only in openssl-1.0.1e: Makefile.orig

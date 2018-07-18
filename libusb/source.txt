@@ -1,0 +1,4 @@
+Source: libusb-1.0.19.tar.bz2
+Source-Url: @SF/libusb
+Source-Version: 
+Source-Proto: 

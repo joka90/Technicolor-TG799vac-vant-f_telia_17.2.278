@@ -1,0 +1,4 @@
+Source: ppp-2.4.7.tar.gz
+Source-Url: https://download.samba.org/pub/ppp/
+Source-Version: 
+Source-Proto: 

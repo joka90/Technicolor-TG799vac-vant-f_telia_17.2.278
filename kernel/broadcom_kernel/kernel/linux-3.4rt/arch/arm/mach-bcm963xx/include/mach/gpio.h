@@ -1,0 +1,1 @@
+#define ARCH_NR_GPIOS 5*32

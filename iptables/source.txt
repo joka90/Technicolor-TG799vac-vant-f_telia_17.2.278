@@ -1,0 +1,4 @@
+Source: iptables-1.4.21.tar.bz2
+Source-Url: http://www.netfilter.org/projects/iptables/files ftp://ftp.be.netfilter.org/pub/netfilter/iptables/ ftp://ftp.de.netfilter.org/pub/netfilter/iptables/ ftp://ftp.no.netfilter.org/pub/netfilter/iptables/
+Source-Version: 
+Source-Proto: 

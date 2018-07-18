@@ -1,0 +1,11 @@
+--- a/QMIDevice.c
++++ b/QMIDevice.c
+@@ -3753,7 +3753,7 @@ int SetupQMIWDSCallback( sGobiUSBNet * p
+    }
+    WDSClientID = result;
+ 
+-#if 0 // add for "AT$QCRMCALL=1,1", be careful: donot enable these codes if use quectel-CM, or cannot obtain IP by udhcpc
++#if 1 // add for "AT$QCRMCALL=1,1", be careful: donot enable these codes if use quectel-CM, or cannot obtain IP by udhcpc
+     if (pDev->mbMdm9x07)
+     {
+        void * pReadBuffer;

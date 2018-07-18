@@ -1,0 +1,73 @@
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.txt.
+#
+mainmenu "Linux/$ARCH $KERNELVERSION Kernel Configuration"
+
+config SRCARCH
+	string
+	option env="SRCARCH"
+
+source "arch/$SRCARCH/Kconfig"
+
+#IGNORE_BCM_KF_EXCEPTION
+source "Kconfig.bcm_kf"
+
+source "Kconfig.bcm"
+
+config BCM_IN_KERNEL
+	bool
+	default y
+
+
+config TCH_KF_VOICE_DECT_MASK
+	bool "Configure boardparms DECT bit-mask"
+	default n
+
+config TCH_KF_VOICE_DECT_MASK_ENBITS
+	hex "boardparms voiceboardId enable bits in DECT bit-mask"
+	depends on TCH_KF_VOICE_DECT_MASK
+
+config TCH_KF_MINIMAL_RAM
+	bool "minimize RAM usage"
+	default n
+
+config TCH_KF_PREALLOC_WL
+	bool "preallocate memory for wl driver"
+	default n
+
+config TCH_KF_WLAN_PERF
+	bool "WLAN perfomance improvements (for 4360 11AC)"
+	default n
+
+config TCH_NUM_STREAMS_8K
+	bool "8K"
+	default n
+
+config TCH_NUM_STREAMS_16K
+	bool "16K"
+	default n
+
+config TCH_NUM_STREAMS_32K
+	bool "32K"
+	default n
+
+config BCM_DSL_GINP_RTX
+	bool "Enable queues for G.INP"
+	default n
+
+config TCH_XTM_QUEUE_DEPTH_4700
+	bool "4700"
+	depends on BCM_DSL_GINP_RTX
+	default n
+
+config TCH_XTM_QUEUE_DEPTH_2350
+	bool "2350"
+	depends on BCM_DSL_GINP_RTX
+	default n
+
+config TCH_XTM_QUEUE_DEPTH_1175
+	bool "1175"
+	depends on BCM_DSL_GINP_RTX
+	default n
+

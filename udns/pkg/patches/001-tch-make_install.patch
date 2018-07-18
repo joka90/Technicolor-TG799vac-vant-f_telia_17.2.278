@@ -1,0 +1,28 @@
+--- a/Makefile.in	2014-01-23 18:45:31.000000000 +0800
++++ b/Makefile.in	2014-12-31 10:36:46.217601233 +0800
+@@ -126,6 +126,7 @@
+ 	rm -f $(SOBJS)
+ 	rm -f $(UOBJS)
+ 	rm -f config.log
++	rm -f $(CURDIR)/usr/bin/
+ distclean: clean
+ 	rm -f $(LIB) $(SOLIB) $(SOLIBV) udns.3.html
+ 	rm -f $(UTILS) $(SOUTILS)
+@@ -139,7 +140,7 @@
+ 	@exit 1
+ 
+ .PHONY: all static staticlib shared sharedlib dist clean distclean subdist \
+-  depend dep deps
++  depend dep deps install
+ 
+ depend dep deps: $(SRCS) $(USRC)
+ 	@echo Generating deps for:
+@@ -195,3 +196,8 @@
+ 	$(LD) $(LDLAGS) -o $@ ex-rdns.o $(LIBFL) $(LIBS)
+ ex-rdns_s: ex-rdns.o $(SOLIB)
+ 	$(LD) $(LDFLAGS) -o $@ ex-rdns.o $(SOLIBFL)
++
++BIN= dnsget
++install:
++	mkdir -p $(CURDIR)/usr/bin/
++	cp $(BIN) $(CURDIR)/usr/bin/

@@ -1,0 +1,4 @@
+Source: rp-pppoe-3.10.tar.gz
+Source-Url: http://roaringpenguin.com/files/download
+Source-Version: 
+Source-Proto: 

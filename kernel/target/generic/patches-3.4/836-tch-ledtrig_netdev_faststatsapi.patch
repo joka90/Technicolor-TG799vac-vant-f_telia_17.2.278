@@ -1,0 +1,78 @@
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -6633,6 +6633,35 @@ struct rtnl_link_stats64 *dev_get_stats(
+ }
+ EXPORT_SYMBOL(dev_get_stats);
+ 
++/**
++ *	dev_get_stats_masked	- get network device statistics
++ *	@dev: device to get statistics from
++ *	@storage: place to store stats
++ *	@mask: fields the caller is interested in
++ *
++ *	Same as dev_get_stats, but can be implemented more efficiently
++ *	since the caller specifies which fields he is interested in. Other
++ *	values might be filled in, but the caller should not rely on them.
++ */
++struct rtnl_link_stats64 *dev_get_stats_masked(struct net_device *dev,
++					struct rtnl_link_stats64 *storage,
++					unsigned long mask)
++{
++	const struct net_device_ops *ops = dev->netdev_ops;
++
++	if (!ops->ndo_get_stats_masked) {
++		/* Device did not implement masked version; fall back to default */
++		return dev_get_stats(dev, storage);
++	}
++
++	netdev_stats_to_stats64(storage, ops->ndo_get_stats_masked(dev, mask));
++	if (mask & NETDEV_STATS_MASK_PACKETS) {
++		storage->rx_dropped += atomic_long_read(&dev->rx_dropped);
++	}
++	return storage;
++}
++EXPORT_SYMBOL(dev_get_stats_masked);
++
+ struct netdev_queue *dev_ingress_queue_create(struct net_device *dev)
+ {
+ 	struct netdev_queue *queue = dev_ingress_queue(dev);
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -958,6 +958,8 @@ struct net_device_ops {
+ 	struct rtnl_link_stats64* (*ndo_get_stats64)(struct net_device *dev,
+ 						     struct rtnl_link_stats64 *storage);
+ 	struct net_device_stats* (*ndo_get_stats)(struct net_device *dev);
++	struct net_device_stats* (*ndo_get_stats_masked)(struct net_device *dev,
++							 unsigned long mask);
+ 
+ 	int			(*ndo_vlan_rx_add_vid)(struct net_device *dev,
+ 						       unsigned short vid);
+@@ -2653,6 +2655,12 @@ extern void		dev_load(struct net *net, c
+ extern void		dev_mcast_init(void);
+ extern struct rtnl_link_stats64 *dev_get_stats(struct net_device *dev,
+ 					       struct rtnl_link_stats64 *storage);
++#define NETDEV_STATS_MASK_PACKETS	1
++#define NETDEV_STATS_MASK_BYTES		2
++#define NETDEV_STATS_MASK_ALL		(NETDEV_STATS_MASK_BYTES | NETDEV_STATS_MASK_PACKETS)
++extern struct rtnl_link_stats64 *dev_get_stats_masked(struct net_device *dev,
++					       struct rtnl_link_stats64 *storage,
++					       unsigned long mask);
+ extern void netdev_stats_to_stats64(struct rtnl_link_stats64 *stats64,
+ 				    const struct net_device_stats *netdev_stats);
+ 
+--- a/drivers/leds/ledtrig-netdev.c
++++ b/drivers/leds/ledtrig-netdev.c
+@@ -441,10 +441,10 @@ static void netdev_trig_work(struct work
+ 			nd_tmp = trigger_data->net_dev[index];
+ 			if (nd_tmp == NULL)
+ 				continue;
+-			dev_stats = dev_get_stats(nd_tmp, &temp);
++			dev_stats = dev_get_stats_masked(nd_tmp, &temp, NETDEV_STATS_MASK_BYTES);
+ 			new_activity +=
+-				((mode & MODE_TX) ? dev_stats->tx_packets : 0) +
+-				((mode & MODE_RX) ? dev_stats->rx_packets : 0);
++				((mode & MODE_TX) ? dev_stats->tx_bytes : 0) +
++				((mode & MODE_RX) ? dev_stats->rx_bytes : 0);
+ 		}
+ 		trigger_data->traffic = (trigger_data->last_activity != new_activity);
+ 		trigger_data->last_activity = new_activity;

@@ -1,0 +1,194 @@
+--- a/commands-nas.h
++++ b/commands-nas.h
+@@ -22,12 +22,16 @@
+ #define __uqmi_nas_commands \
+ 	__uqmi_command(nas_do_set_system_selection, __set-system-selection, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_set_network_modes, set-network-modes, required, CMD_TYPE_OPTION), \
+-	__uqmi_command(nas_initiate_network_register, network-register, no, QMI_SERVICE_NAS), \
++	__uqmi_command(nas_network_register, network-register, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_set_plmn, set-plmn, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_set_mcc, mcc, required, CMD_TYPE_OPTION), \
+ 	__uqmi_command(nas_set_mnc, mnc, required, CMD_TYPE_OPTION), \
++	__uqmi_command(nas_set_reg_mcc, reg_mcc, required, CMD_TYPE_OPTION), \
++	__uqmi_command(nas_set_reg_mnc, reg_mnc, required, CMD_TYPE_OPTION), \
++	__uqmi_command(nas_set_reg_radio, reg_radio, required, CMD_TYPE_OPTION), \
+ 	__uqmi_command(nas_network_scan, network-scan, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_get_signal_info, get-signal-info, no, QMI_SERVICE_NAS), \
++	__uqmi_command(nas_get_network_modes, get-network-modes, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_get_serving_system, get-serving-system, no, QMI_SERVICE_NAS), \
+ 	__uqmi_command(nas_set_network_preference, set-network-preference, required, CMD_TYPE_OPTION), \
+ 	__uqmi_command(nas_set_roaming, set-network-roaming, required, CMD_TYPE_OPTION) \
+@@ -41,9 +45,14 @@
+ 		"                                    Available modes: any, off, only\n" \
+ 		"  --network-scan:                   Initiate network scan\n" \
+ 		"  --network-register:               Initiate network register\n" \
++		"    --reg_mcc <mcc>:                Mobile Country Code (0 - auto)\n" \
++		"    --reg_mnc <mnc>:                Mobile Network Code\n" \
++		"    --reg_radio <mode>:             Mobile Network Radio mode\n" \
++		"                                    Available radio modes: gsm, umts, lte; if not specified = auto\n" \
+ 		"  --set-plmn:                       Register at specified network\n" \
+ 		"    --mcc <mcc>:                    Mobile Country Code (0 - auto)\n" \
+ 		"    --mnc <mnc>:                    Mobile Network Code\n" \
+ 		"  --get-signal-info:                Get signal strength info\n" \
++		"  --get-network-modes:              Get network modes info\n" \
+ 		"  --get-serving-system:             Get serving system info\n" \
+ 
+--- a/commands-nas.c
++++ b/commands-nas.c
+@@ -27,6 +27,12 @@ static struct	{
+ 	bool mnc_is_set;
+ } plmn_code_flag;
+ 
++static struct qmi_nas_initiate_network_register_request reg_req;
++static struct	{
++	bool reg_mcc_is_set;
++	bool reg_mnc_is_set;
++	bool reg_radio_is_set;
++} reg_code_flag;
+ #define cmd_nas_do_set_system_selection_cb no_cb
+ static enum qmi_cmd_result
+ cmd_nas_do_set_system_selection_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
+@@ -180,15 +186,83 @@ cmd_nas_set_plmn_prepare(struct qmi_dev
+ 	return do_sel_network();
+ }
+ 
+-#define cmd_nas_initiate_network_register_cb no_cb
++#define cmd_nas_set_reg_mcc_cb no_cb
+ static enum qmi_cmd_result
+-cmd_nas_initiate_network_register_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++cmd_nas_set_reg_mcc_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
+ {
+-	static struct qmi_nas_initiate_network_register_request register_req = {
+-		QMI_INIT(action, QMI_NAS_NETWORK_REGISTER_TYPE_AUTOMATIC)
+-	};
++	char *err;
++	int value = strtoul(arg, &err, 10);
++	if (err && *err) {
++		uqmi_add_error("Invalid MCC value");
++		return QMI_CMD_EXIT;
++	}
++
++	reg_req.data.manual_registration_info_3gpp.mcc = value;
++	reg_code_flag.reg_mcc_is_set = true;
++	return QMI_CMD_DONE;
++}
++
++#define cmd_nas_set_reg_mnc_cb no_cb
++static enum qmi_cmd_result
++cmd_nas_set_reg_mnc_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	char *err;
++	int value = strtoul(arg, &err, 10);
++	if (err && *err) {
++		uqmi_add_error("Invalid MNC value");
++		return QMI_CMD_EXIT;
++	}
++
++	reg_req.data.manual_registration_info_3gpp.mnc = value;
++	reg_code_flag.reg_mnc_is_set = true;
++	return QMI_CMD_DONE;
++}
++
++#define cmd_nas_set_reg_radio_cb no_cb
++static enum qmi_cmd_result
++cmd_nas_set_reg_radio_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	QmiNasRadioInterface pref;
++
++	if (!strcmp(arg, "gsm"))
++		pref = QMI_NAS_RADIO_INTERFACE_GSM;
++	else if (!strcmp(arg, "umts"))
++		pref = QMI_NAS_RADIO_INTERFACE_UMTS;
++	else if (!strcmp(arg, "lte"))
++		pref = QMI_NAS_RADIO_INTERFACE_LTE;
++	else
++		pref = QMI_NAS_RADIO_INTERFACE_UNKNOWN;
++
++	reg_req.data.manual_registration_info_3gpp.radio_interface = pref;
++	reg_code_flag.reg_radio_is_set = true;
++	return QMI_CMD_DONE;
++}
+ 
+-	qmi_set_nas_initiate_network_register_request(msg, &register_req);
++#define cmd_nas_network_register_cb no_cb
++static enum qmi_cmd_result
++cmd_nas_network_register_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	if (!reg_code_flag.reg_radio_is_set && !reg_code_flag.reg_mnc_is_set && !reg_code_flag.reg_mcc_is_set) {
++		reg_req.set.action = 1;
++		reg_req.data.action = QMI_NAS_NETWORK_REGISTER_TYPE_AUTOMATIC;
++		reg_req.set.manual_registration_info_3gpp = 0;
++		}
++	else {
++		if (!reg_code_flag.reg_mcc_is_set || !reg_code_flag.reg_mnc_is_set || !reg_code_flag.reg_radio_is_set) {
++			uqmi_add_error("Manual registration parameter missing");
++			return QMI_CMD_EXIT;
++			}
++		reg_req.set.action = 1;
++		reg_req.data.action = QMI_NAS_NETWORK_REGISTER_TYPE_MANUAL;
++		reg_req.set.manual_registration_info_3gpp = 1;
++		}
++	qmi_set_nas_initiate_network_register_request(msg, &reg_req);
++	reg_req.data.manual_registration_info_3gpp.mcc = 0;
++	reg_req.data.manual_registration_info_3gpp.mnc = 0;
++	reg_req.data.manual_registration_info_3gpp.radio_interface = QMI_NAS_RADIO_INTERFACE_UNKNOWN;
++	reg_code_flag.reg_radio_is_set =false;
++	reg_code_flag.reg_mnc_is_set = false;
++	reg_code_flag.reg_mcc_is_set = false;
+ 	return QMI_CMD_REQUEST;
+ }
+ 
+@@ -248,6 +322,53 @@ cmd_nas_get_signal_info_prepare(struct q
+ 	return QMI_CMD_REQUEST;
+ }
+ 
++static void
++cmd_nas_get_network_modes_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
++{
++	struct qmi_nas_get_network_modes_response res;
++	static const struct {
++		const char *name;
++		QmiNasRatModePreference mask;
++	} mode[] = {
++		{ "cdma", QMI_NAS_RAT_MODE_PREFERENCE_CDMA_1X | QMI_NAS_RAT_MODE_PREFERENCE_CDMA_1XEVDO },
++		{ "td-scdma", QMI_NAS_RAT_MODE_PREFERENCE_TD_SCDMA },
++		{ "gsm", QMI_NAS_RAT_MODE_PREFERENCE_GSM },
++		{ "umts", QMI_NAS_RAT_MODE_PREFERENCE_UMTS },
++		{ "lte", QMI_NAS_RAT_MODE_PREFERENCE_LTE },
++	};
++	int i;
++	void *c;
++
++	qmi_parse_nas_get_network_modes_response(msg, &res);
++	c = blobmsg_open_table(&status, NULL);
++	if (res.set.idx0_mode_pref) {
++		int modes = res.data.idx0_mode_pref;
++		
++		for ( i = 0; i < ARRAY_SIZE(mode); ++i) {
++			if ( (mode[i].mask & modes) != 0) {
++				blobmsg_add_string(&status, "idx0_mode_preference", mode[i].name);
++			}
++		}
++	}
++	if (res.set.idx1_mode_pref) {
++		int modes = res.data.idx0_mode_pref;
++		
++		for ( i = 0; i < ARRAY_SIZE(mode); ++i) {
++			if ( (mode[i].mask & modes) != 0) {
++				blobmsg_add_string(&status, "idx1_mode_preference", mode[i].name);
++			}
++		}
++	}
++	blobmsg_close_table(&status, c);
++}
++
++static enum qmi_cmd_result
++cmd_nas_get_network_modes_prepare(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg, char *arg)
++{
++	qmi_set_nas_get_network_modes_request(msg);
++	return QMI_CMD_REQUEST;
++}
++
+ static void
+ cmd_nas_get_serving_system_cb(struct qmi_dev *qmi, struct qmi_request *req, struct qmi_msg *msg)
+ {

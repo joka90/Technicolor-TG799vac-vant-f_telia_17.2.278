@@ -1,0 +1,14 @@
+diff -ru a/source/smbd/pipes.c b/source/smbd/pipes.c
+--- a/source/smbd/pipes.c	2016-09-26 14:32:23.736823987 +0800
++++ b/source/smbd/pipes.c	2016-09-26 14:42:11.320816114 +0800
+@@ -299,6 +299,9 @@
+ 	if (!close_rpc_pipe_hnd(p)) {
+ 		return ERROR_DOS(ERRDOS,ERRbadfid);
+ 	}
+-	
++
++	DEBUG(5,("reply_pipe_close: reset_chain_p\n"));
++	reset_chain_p();
++
+ 	return(outsize);
+ }

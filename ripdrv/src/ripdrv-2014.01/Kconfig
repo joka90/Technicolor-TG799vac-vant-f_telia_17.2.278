@@ -1,0 +1,9 @@
+config RIPDRV
+     tristate "RIP kernel module"
+     help
+         this Kernel module provides access to the RIP on Technicolor Broadcom gateways
+config RIPDRV_CRYPTO_SUPPORT
+	depends RIPDRV
+	bool "Support encrypted parameters in RIP"
+	help
+		select this option if your Technicolor gateway has a RIP with encrypted parameters.

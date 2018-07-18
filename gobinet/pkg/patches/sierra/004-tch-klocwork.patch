@@ -1,0 +1,12 @@
+--- a/QMIDevice.c
++++ b/QMIDevice.c
+@@ -3439,7 +3439,8 @@ void DeregisterQMIDevice( sGobiUSBNet *
+                       pDev->mQMIDev.mDevNum );
+    }
+ 
+-   qcqmi_table[pDev->mQMIDev.qcqmi] = 0;
++   if(pDev->mQMIDev.qcqmi < MAX_QCQMI)
++      qcqmi_table[pDev->mQMIDev.qcqmi] = 0;
+ 
+    // Hold onto cdev memory location until everyone is through using it.
+    // Timeout after 30 seconds (10 ms interval).  Timeout should never happen,

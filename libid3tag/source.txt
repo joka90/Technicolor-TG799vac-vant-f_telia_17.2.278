@@ -1,0 +1,4 @@
+Source: libid3tag-0.15.1b.tar.gz
+Source-Url: @SF/mad
+Source-Version: 
+Source-Proto: 

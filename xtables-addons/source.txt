@@ -1,0 +1,4 @@
+Source: xtables-addons-1.42.tar.xz
+Source-Url: @SF/xtables-addons
+Source-Version: 
+Source-Proto: 

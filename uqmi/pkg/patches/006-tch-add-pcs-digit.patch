@@ -1,0 +1,13 @@
+--- a/commands-nas.c
++++ b/commands-nas.c
+@@ -400,6 +400,10 @@ cmd_nas_get_serving_system_cb(struct qmi
+ 			blobmsg_add_string(&status, "plmn_description", res.data.current_plmn.description);
+ 	}
+ 
++	if (res.set.mnc_pcs_digit_include_status) {
++		blobmsg_add_u32(&status, "pcs_digit_include", res.data.mnc_pcs_digit_include_status.includes_pcs_digit);
++	}
++
+ 	if (res.set.roaming_indicator)
+ 		blobmsg_add_u8(&status, "roaming", !res.data.roaming_indicator);
+ 

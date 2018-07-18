@@ -1,0 +1,4 @@
+Source: dnsmasq-2.78.tar.xz
+Source-Url: http://thekelleys.org.uk/dnsmasq/
+Source-Version: 
+Source-Proto: 

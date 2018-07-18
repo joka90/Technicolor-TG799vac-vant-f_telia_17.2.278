@@ -1,0 +1,59 @@
+From d4915c087f7c2457c580efc16fe0bfa1a576274d Mon Sep 17 00:00:00 2001
+From: Amerigo Wang <amwang@redhat.com>
+Date: Tue, 18 Sep 2012 16:50:10 +0000
+Subject: [PATCH 4/5] ipv6: make ip6_frag_nqueues() and ip6_frag_mem() static inline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cc: Herbert Xu <herbert@gondor.apana.org.au>
+Cc: Michal Kubeček <mkubecek@suse.cz>
+Cc: David Miller <davem@davemloft.net>
+Signed-off-by: Cong Wang <amwang@redhat.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ include/net/ipv6.h    |   13 +++++++++++--
+ net/ipv6/reassembly.c |   10 ----------
+ 2 files changed, 11 insertions(+), 12 deletions(-)
+
+--- a/include/net/ipv6.h
++++ b/include/net/ipv6.h
+@@ -266,8 +266,17 @@ struct ipv6_txoptions *ipv6_fixup_option
+ 
+ extern int ipv6_opt_accepted(struct sock *sk, struct sk_buff *skb);
+ 
+-int ip6_frag_nqueues(struct net *net);
+-int ip6_frag_mem(struct net *net);
++#if IS_ENABLED(CONFIG_IPV6)
++static inline int ip6_frag_nqueues(struct net *net)
++{
++	return net->ipv6.frags.nqueues;
++}
++
++static inline int ip6_frag_mem(struct net *net)
++{
++	return atomic_read(&net->ipv6.frags.mem);
++}
++#endif
+ 
+ #define IPV6_FRAG_HIGH_THRESH	(256 * 1024)	/* 262144 */
+ #define IPV6_FRAG_LOW_THRESH	(192 * 1024)	/* 196608 */
+--- a/net/ipv6/reassembly.c
++++ b/net/ipv6/reassembly.c
+@@ -67,16 +67,6 @@ struct ip6frag_skb_cb
+ 
+ static struct inet_frags ip6_frags;
+ 
+-int ip6_frag_nqueues(struct net *net)
+-{
+-	return net->ipv6.frags.nqueues;
+-}
+-
+-int ip6_frag_mem(struct net *net)
+-{
+-	return atomic_read(&net->ipv6.frags.mem);
+-}
+-
+ static int ip6_frag_reasm(struct frag_queue *fq, struct sk_buff *prev,
+ 			  struct net_device *dev);
+ 

@@ -1,0 +1,4 @@
+Source: libexif-0.6.21.tar.bz2
+Source-Url: @SF/libexif
+Source-Version: 
+Source-Proto: 

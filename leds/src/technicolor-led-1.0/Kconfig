@@ -1,0 +1,4 @@
+config TECHNICOLOR_LED
+	tristate "Technicolor LED Support"
+	help
+        Enable LED driver for Technicolor Linux Gateways

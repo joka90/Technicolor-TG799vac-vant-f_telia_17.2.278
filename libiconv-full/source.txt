@@ -1,0 +1,4 @@
+Source: libiconv-1.11.1.tar.gz
+Source-Url: @GNU/libiconv
+Source-Version: 
+Source-Proto: 

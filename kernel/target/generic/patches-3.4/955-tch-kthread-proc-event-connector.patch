@@ -1,0 +1,32 @@
+--- a/kernel/kthread.c
++++ b/kernel/kthread.c
+@@ -18,6 +18,8 @@
+ #include <linux/freezer.h>
+ #include <trace/events/sched.h>
+ 
++#include <linux/cn_proc.h>
++
+ static DEFINE_SPINLOCK(kthread_create_lock);
+ static LIST_HEAD(kthread_create_list);
+ struct task_struct *kthreadd_task;
+@@ -206,6 +208,10 @@ struct task_struct *kthread_create_on_no
+ 		sched_setscheduler_nocheck(create.result, SCHED_NORMAL, &param);
+ 		set_cpus_allowed_ptr(create.result, cpu_all_mask);
+ 	}
++
++	/* borrow PROC_EVENT_EXEC of process event connector for kernel thread */
++	proc_exec_connector(create.result);
++
+ 	return create.result;
+ }
+ EXPORT_SYMBOL(kthread_create_on_node);
+@@ -265,6 +271,9 @@ int kthread_stop(struct task_struct *k)
+ 	}
+ 	ret = k->exit_code;
+ 
++	/* send EXIT event to proc event connector */
++	proc_exit_connector(k);
++
+ 	put_task_struct(k);
+ 	trace_sched_kthread_stop_ret(ret);
+ 

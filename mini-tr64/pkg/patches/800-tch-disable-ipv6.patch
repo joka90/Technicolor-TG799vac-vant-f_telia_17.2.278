@@ -1,0 +1,11 @@
+--- a/src/config.h
++++ b/src/config.h
+@@ -29,7 +29,7 @@
+ #define USE_DAEMON
+ 
+ /* Enable IP v6 support */
+-#define ENABLE_IPV6
++/*#define ENABLE_IPV6*/
+ 
+ /* Define V6SOCKETS_ARE_V6ONLY if AF_INET6 sockets are restricted
+  * to IPv6 communications only. */

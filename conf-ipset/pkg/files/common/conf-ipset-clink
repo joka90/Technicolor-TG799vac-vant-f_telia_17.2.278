@@ -1,0 +1,5 @@
+config ipset 'ServiceBlocking'
+	option storage 'hash'
+	option match 'src_ip'
+	option enabled '1'
+	option family 'ipv4'

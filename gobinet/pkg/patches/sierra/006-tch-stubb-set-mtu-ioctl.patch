@@ -1,0 +1,20 @@
+--- a/QMIDevice.c	2015-10-02 15:54:18.882068957 +0200
++++ b/QMIDevice.c	2015-10-02 15:56:10.790222592 +0200
+@@ -2546,6 +2546,9 @@
+          break;
+          case IOCTL_QMI_SET_DEVICE_MTU:
+          {
++#if 1
++             DBG( "!IOCTL_QMI_SET_DEVICE_MTU: stubbed!\n" );
++#else
+              sGobiUSBNet *pDev = pFilpData->mpDev;
+              // struct usbnet * pNet = netdev_priv( pDev->mpNetDev->net );
+              int iArgp = (int)arg;
+@@ -2557,6 +2560,7 @@
+              DBG( "new mtu :%d ,qcqmi:%d\n",iArgp,(int)pDev->mQMIDev.qcqmi );
+              pDev->mtu = iArgp;
+              usbnet_change_mtu(pDev->mpNetDev->net ,pDev->mtu);
++#endif
+          }
+          return 0;
+       default:

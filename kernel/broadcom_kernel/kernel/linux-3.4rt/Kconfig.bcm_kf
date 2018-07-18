@@ -1,0 +1,441 @@
+#
+# Automatically Generated Kconfig File.  DO NOT MODIFY
+#
+
+
+config BCM_KF_MISC_MAKEFILE:
+	bool "dummy"
+	default y
+
+config BCM_KF_MIPS_BCM963XX:
+	bool "dummy"
+	default y
+
+config BCM_KF_MIPS_BCM9685XX:
+	bool "dummy"
+	default y
+
+config BCM_KF_ARM_BCM963XX:
+	bool "dummy"
+	default y
+
+config BCM_KF_LINKER_WORKAROUND:
+	bool "dummy"
+	default y
+
+config BCM_KF_KERN_WARNING:
+	bool "dummy"
+	default y
+
+config BCM_KF_FIXADDR_TOP:
+	bool "dummy"
+	default y
+
+config BCM_KF_NBUFF:
+	bool "dummy"
+	default y
+
+config BCM_KF_BLOG:
+	bool "dummy"
+	default y
+
+config BCM_KF_VLANCTL_BIND:
+	bool "dummy"
+	default y
+
+config BCM_KF_WANDEV:
+	bool "dummy"
+	default y
+
+config BCM_KF_FAP:
+	bool "dummy"
+	default y
+
+config BCM_KF_CSUM_UNALIGNED:
+	bool "dummy"
+	default y
+
+config BCM_KF_THREAD_SIZE_FIX:
+	bool "dummy"
+	default y
+
+config BCM_KF_TSTAMP:
+	bool "dummy"
+	default y
+
+config BCM_KF_UNALIGNED_EXCEPTION:
+	bool "dummy"
+	default y
+
+config BCM_KF_MIPS_IOPORT_BASE:
+	bool "dummy"
+	default y
+
+config BCM_KF_SHOW_RAW_BACKTRACE:
+	bool "dummy"
+	default y
+
+config BCM_KF_DCACHE_SHARED:
+	bool "dummy"
+	default y
+
+config BCM_KF_CPU_DATA_CPUID:
+	bool "dummy"
+	default y
+
+config BCM_KF_PCI_FIXUP:
+	bool "dummy"
+	default y
+
+config BCM_KF_SYSRQ_AUX_CHAR:
+	bool "dummy"
+	default y
+
+config BCM_KF_CHAR_SYSRQ:
+	bool "dummy"
+	default y
+
+config BCM_KF_MTD_BCMNAND:
+	bool "dummy"
+	default y
+
+config BCM_KF_MTD_BCM963XX:
+	bool "dummy"
+	default y
+
+config BCM_KF_MTD_OOB_AUTO:
+	bool "dummy"
+	default y
+
+config BCM_KF_MTD_IOCTL_FIX:
+	bool "dummy"
+	default y
+
+config BCM_KF_PPP:
+	bool "dummy"
+	default y
+
+config BCM_KF_PROC_BCM:
+	bool "dummy"
+	default y
+
+config BCM_KF_IKOS:
+	bool "dummy"
+	default y
+
+config BCM_KF_DSP:
+	bool "dummy"
+	default y
+
+config BCM_KF_LOG:
+	bool "dummy"
+	default y
+
+config BCM_KF_TRACE_CUSTOM:
+	bool "dummy"
+	default y
+
+config BCM_KF_CGROUP:
+	bool "dummy"
+	default y
+
+config BCM_KF_HARDIRQ_CYCLES:
+	bool "dummy"
+	default n
+
+config BCM_KF_CONSOLE_LOGLEVEL:
+	bool "dummy"
+	default y
+
+config BCM_KF_SHOW_HEAP_STACK:
+	bool "dummy"
+	default y
+
+config BCM_KF_BYPASS_SMP_WARNING:
+	bool "dummy"
+	default y
+
+config BCM_KF_OOM_REBOOT:
+	bool "dummy"
+	default y
+
+config BCM_KF_VMSCAN_OPT:
+	bool "dummy"
+	default y
+
+config BCM_KF_CPP_SUPPORT:
+	bool "dummy"
+	default y
+
+config BCM_KF_SKB_DEFINES:
+	bool "dummy"
+	default y
+
+config BCM_KF_VLAN:
+	bool "dummy"
+	default y
+
+config BCM_KF_IGMP:
+	bool "dummy"
+	default y
+
+config BCM_KF_IGMP_RATE_LIMIT:
+	bool "dummy"
+	default y
+
+config BCM_KF_MLD:
+	bool "dummy"
+	default y
+
+config BCM_KF_NETDEV_PATH:
+	bool "dummy"
+	default y
+
+config BCM_KF_MISC_IOCTLS:
+	bool "dummy"
+	default y
+
+config BCM_KF_MISALIGN_MQS:
+	bool "dummy"
+	default n
+
+config BCM_KF_NETFILTER:
+	bool "dummy"
+	default y
+
+config BCM_KF_ENET_SWITCH:
+	bool "dummy"
+	default y
+
+config BCM_KF_NAND:
+	bool "dummy"
+	default y
+
+config BCM_KF_FAIL_CONFIG_ON_EOF:
+	bool "dummy"
+	default y
+
+config BCM_KF_RUNNER:
+	bool "dummy"
+	default y
+
+config BCM_KF_WL:
+	bool "dummy"
+	default y
+
+config BCM_KF_LINKWATCH_WQ:
+	bool "dummy"
+	default y
+
+config BCM_KF_IP:
+	bool "dummy"
+	default y
+
+config BCM_KF_SPU:
+	bool "dummy"
+	default y
+
+config BCM_KF_80211:
+	bool "dummy"
+	default y
+
+config BCM_KF_SCHEDAUDIT:
+	bool "dummy"
+	default n
+
+config BCM_KF_BALOO:
+	bool "dummy"
+	default y
+
+config BCM_KF_BOUNCE:
+	bool "dummy"
+	default y
+
+config BCM_KF_ATM_BACKEND:
+	bool "dummy"
+	default y
+
+config BCM_KF_EXTRA_DEBUG:
+	bool "dummy"
+	default y
+
+config BCM_KF_SPI:
+	bool "dummy"
+	default y
+
+config BCM_KF_MUTEX_FIX:
+	bool "dummy"
+	default y
+
+config BCM_KF_POWER_SAVE:
+	bool "dummy"
+	default y
+
+config BCM_KF_DSP_EXCEPT:
+	bool "dummy"
+	default y
+
+config BCM_KF_UNI_UNI:
+	bool "dummy"
+	default y
+
+config BCM_KF_MODULE_OWNER:
+	bool "dummy"
+	default y
+
+config BCM_KF_RCU_CONSTANT_BUG:
+	bool "dummy"
+	default y
+
+config BCM_KF_JFFS:
+	bool "dummy"
+	default y
+
+config BCM_KF_PROC_DEFAULT:
+	bool "dummy"
+	default y
+
+config BCM_KF_ASSERT:
+	bool "dummy"
+	default y
+
+config BCM_KF_EXTSTATS:
+	bool "dummy"
+	default y
+
+config BCM_KF_USB_STORAGE:
+	bool "dummy"
+	default y
+
+config BCM_KF_USBNET:
+	bool "dummy"
+	default y
+
+config BCM_KF_FAP_GSO_LOOPBACK:
+	bool "dummy"
+	default y
+
+config BCM_KF_PROTO_IPSEC:
+	bool "dummy"
+	default y
+
+config BCM_KF_PROTO_ESP:
+	bool "dummy"
+	default y
+
+config BCM_KF_PRINTK_INT_ENABLED:
+	bool "dummy"
+	default y
+
+config BCM_KF_LIMITED_IFINDEX:
+	bool "dummy"
+	default y
+
+config BCM_KF_PMON:
+	bool "dummy"
+	default y
+
+config BCM_KF_BRIDGE_PORT_ISOLATION:
+	bool "dummy"
+	default y
+
+config BCM_KF_BRIDGE_STP:
+	bool "dummy"
+	default y
+
+config BCM_KF_STP_LOOP:
+	bool "dummy"
+	default y
+
+config BCM_KF_BRIDGE_STATIC_FDB:
+	bool "dummy"
+	default y
+
+config BCM_KF_BRIDGE_DYNAMIC_FDB:
+	bool "dummy"
+	default y
+
+config BCM_KF_BRIDGE_MAC_FDB_LIMIT:
+	bool "dummy"
+	default y
+
+config BCM_KF_IEEE1905:
+	bool "dummy"
+	default y
+
+config BCM_KF_FBOND:
+	bool "dummy"
+	default y
+
+config BCM_KF_MCAST_RP_FILTER:
+	bool "dummy"
+	default y
+
+config BCM_KF_XT_MATCH_LAYER7:
+	bool "dummy"
+	default y
+
+config BCM_KF_XT_TARGET_DC:
+	bool "dummy"
+	default y
+
+config BCM_KF_VLAN_AGGREGATION:
+	bool "dummy"
+	default y
+
+config BCM_KF_ETHTOOL:
+	bool "dummy"
+	default y
+
+config BCM_KF_DEBUGGING_DISABLED_FIX:
+	bool "dummy"
+	default y
+
+config BCM_KF_CPU_DOWN_PREEMPT_ON:
+	bool "dummy"
+	default y
+
+config BCM_KF_IPV6RD_SECURITY:
+	bool "dummy"
+	default y
+
+config BCM_KF_DPI:
+	bool "dummy"
+	default y
+
+config BCM_KF_ARM_ERRATA_798181:
+	bool "dummy"
+	default y
+
+config BCM_KF_ARM_PLD:
+	bool "dummy"
+	default y
+
+config BCM_KF_MISC_3_4_CVE_PORTS:
+	bool "dummy"
+	default y
+
+config BCM_KF_SCHED_RT:
+	bool "dummy"
+	default y
+
+config BCM_KF_SCHED_RT_SHARE:
+	bool "dummy"
+	default y
+
+config BCM_KF_MODINST_DIR:
+	bool "dummy"
+	default y
+
+config BCM_KF_WLAN:
+	bool "dummy"
+	default y
+
+config BCM_KF_ONDEMAND:
+	bool "dummy"
+	default y
+
+config BCM_KF_USB_HOSTS:
+	bool "dummy"
+	default y
+

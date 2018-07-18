@@ -1,0 +1,4 @@
+Source: librpc-2015-04-10-308e9964bfb623773dc0dcc99ef9d18d1551d6ae.tar.gz
+Source-Url: git://nbd.name/uclibc-rpc.git
+Source-Version: 308e9964bfb623773dc0dcc99ef9d18d1551d6ae
+Source-Proto: 

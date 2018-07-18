@@ -1,0 +1,162 @@
+--- a/net/bridge/br_multicast.c
++++ b/net/bridge/br_multicast.c
+@@ -36,7 +36,14 @@
+ #define mlock_dereference(X, br) \
+ 	rcu_dereference_protected(X, lockdep_is_held(&br->multicast_lock))
+ 
++static void br_ip4_multicast_leave_group(struct net_bridge *br,
++					 struct net_bridge_port *port,
++					 __be32 group);
+ #if IS_ENABLED(CONFIG_IPV6)
++static void br_ip6_multicast_leave_group(struct net_bridge *br,
++					 struct net_bridge_port *port,
++					 const struct in6_addr *group);
++
+ static inline int ipv6_is_transient_multicast(const struct in6_addr *addr)
+ {
+ 	if (ipv6_addr_is_multicast(addr) && IPV6_ADDR_MC_FLAG_TRANSIENT(addr))
+@@ -910,9 +917,15 @@ static int br_ip4_multicast_igmp3_report
+ 			continue;
+ 		}
+ 
+-		err = br_ip4_multicast_add_group(br, port, group);
+-		if (err)
+-			break;
++		if ((type == IGMPV3_CHANGE_TO_INCLUDE ||
++		     type == IGMPV3_MODE_IS_INCLUDE) &&
++		    ntohs(grec->grec_nsrcs) == 0) {
++			br_ip4_multicast_leave_group(br, port, group);
++		} else {
++			err = br_ip4_multicast_add_group(br, port, group);
++			if (err)
++				break;
++		}
+ 	}
+ 
+ 	return err;
+@@ -970,9 +983,16 @@ static int br_ip6_multicast_mld2_report(
+ 			continue;
+ 		}
+ 
+-		err = br_ip6_multicast_add_group(br, port, &grec->grec_mca);
+-		if (!err)
+-			break;
++		if ((grec->grec_type == MLD2_CHANGE_TO_INCLUDE ||
++		     grec->grec_type == MLD2_MODE_IS_INCLUDE) &&
++		    ntohs(*nsrcs) == 0) {
++			br_ip6_multicast_leave_group(br, port, &grec->grec_mca);
++		} else {
++			err = br_ip6_multicast_add_group(br, port,
++							 &grec->grec_mca);
++			if (!err)
++				break;
++		}
+ 	}
+ 
+ 	return err;
+@@ -1198,8 +1218,7 @@ static void br_multicast_leave_group(str
+ 
+ 	spin_lock(&br->multicast_lock);
+ 	if (!netif_running(br->dev) ||
+-	    (port && port->state == BR_STATE_DISABLED) ||
+-	    timer_pending(&br->multicast_querier_timer))
++	    (port && port->state == BR_STATE_DISABLED))
+ 		goto out;
+ 
+ 	mdb = mlock_dereference(br->mdb, br);
+@@ -1207,6 +1226,30 @@ static void br_multicast_leave_group(str
+ 	if (!mp)
+ 		goto out;
+ 
++	if (port && (port->flags & BR_MULTICAST_FAST_LEAVE)) {
++		struct net_bridge_port_group __rcu **pp;
++
++		for (pp = &mp->ports;
++		     (p = mlock_dereference(*pp, br)) != NULL;
++		     pp = &p->next) {
++			if (p->port != port)
++				continue;
++
++			rcu_assign_pointer(*pp, p->next);
++			hlist_del_init(&p->mglist);
++			del_timer(&p->timer);
++			call_rcu_bh(&p->rcu, br_multicast_free_pg);
++
++			if (!mp->ports && !mp->mglist &&
++			    netif_running(br->dev))
++				mod_timer(&mp->timer, jiffies);
++		}
++		goto out;
++	}
++
++	if (timer_pending(&br->multicast_querier_timer))
++		goto out;
++
+ 	now = jiffies;
+ 	time = now + br->multicast_last_member_count *
+ 		     br->multicast_last_member_interval;
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -191,6 +191,7 @@ struct net_bridge_port
+ 
+ 	unsigned long 			flags;
+ #define BR_HAIRPIN_MODE		0x00000001
++#define BR_MULTICAST_FAST_LEAVE 0x00000008
+ 
+ #if defined(CONFIG_BCM_KF_STP_LOOP)
+ 	struct {		
+--- a/net/bridge/br_sysfs_if.c
++++ b/net/bridge/br_sysfs_if.c
+@@ -34,6 +34,36 @@ struct brport_attribute brport_attr_##_n
+ 	.store	= _store,					\
+ };
+ 
++#define BRPORT_ATTR_FLAG(_name, _mask)				\
++static ssize_t show_##_name(struct net_bridge_port *p, char *buf) \
++{								\
++	return sprintf(buf, "%d\n", !!(p->flags & _mask));	\
++}								\
++static int store_##_name(struct net_bridge_port *p, unsigned long v) \
++{								\
++	return store_flag(p, v, _mask);				\
++}								\
++static BRPORT_ATTR(_name, S_IRUGO | S_IWUSR,			\
++		   show_##_name, store_##_name)
++
++static int store_flag(struct net_bridge_port *p, unsigned long v,
++		      unsigned long mask)
++{
++	unsigned long flags;
++
++	flags = p->flags;
++
++	if (v)
++		flags |= mask;
++	else
++		flags &= ~mask;
++
++	if (flags != p->flags) {
++		p->flags = flags;
++	}
++	return 0;
++}
++
+ static ssize_t show_path_cost(struct net_bridge_port *p, char *buf)
+ {
+ 	return sprintf(buf, "%d\n", p->path_cost);
+@@ -162,6 +192,7 @@ static int store_multicast_router(struct
+ }
+ static BRPORT_ATTR(multicast_router, S_IRUGO | S_IWUSR, show_multicast_router,
+ 		   store_multicast_router);
++BRPORT_ATTR_FLAG(multicast_fast_leave, BR_MULTICAST_FAST_LEAVE);
+ #endif
+ 
+ static struct brport_attribute *brport_attrs[] = {
+@@ -183,6 +214,7 @@ static struct brport_attribute *brport_a
+ 	&brport_attr_hairpin_mode,
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ 	&brport_attr_multicast_router,
++	&brport_attr_multicast_fast_leave,
+ #endif
+ 	NULL
+ };
